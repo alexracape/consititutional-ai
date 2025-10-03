@@ -2,6 +2,8 @@
 import logging
 from tqdm import tqdm
 import pandas as pd
+
+import torch
 from transformers import pipeline, infer_device
 from datasets import load_dataset, Dataset
 from constitution import Constitution
@@ -16,7 +18,13 @@ BATCH_SIZE = 3
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-device = infer_device()
+
+if torch.cuda.is_available():
+    device = 0  # Use first CUDA GPU
+elif torch.backends.mps.is_available():
+    device = "mps"  # Use Apple Silicon GPU
+else:
+    device = -1  # Use CPU
 
 
 class LLM:
@@ -99,7 +107,7 @@ class CAIProcessor:
             messages.append({"role": "user", "content": prompt})
             messages.append({"role": "assistant", "content": dialogue[response_idx]['content']})
 
-    def generate_critique(self, history, critique_request):
+    def _generate_critique(self, history, critique_request):
         """Format chat history and few-shot examples into complete prompt"""
         messages = [{"role": "system", "content": self.CRITIQUE_SYSTEM_PROMPT}]
         
@@ -117,7 +125,7 @@ class CAIProcessor:
         
         return self.llm.generate(messages)
 
-    def generate_revision(self, history, critique_request, critique, revision_request):
+    def _generate_revision(self, history, critique_request, critique, revision_request):
         """Format chat history and few-shot examples into complete prompt"""
         messages = [{"role": "system", "content": self.REVISION_SYSTEM_PROMPT}]
         
