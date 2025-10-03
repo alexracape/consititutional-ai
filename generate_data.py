@@ -2,21 +2,21 @@
 import logging
 from tqdm import tqdm
 import pandas as pd
-from transformers import pipeline
+from transformers import pipeline, infer_device
 from datasets import load_dataset, Dataset
 from constitution import Constitution
 
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-
-MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
+MODEL = "Qwen/Qwen2.5-3B-Instruct"
 NEW_DATASET = "aracape/cai-education"
 NUM_REVISIONS = 1
 NUM_TO_GENERATE = 3
 NUM_TURNS = 4
 BATCH_SIZE = 3
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+device = infer_device()
 
 
 class LLM:
@@ -35,16 +35,17 @@ class LLM:
         return pipeline(
             "text-generation",
             model=self.model_name,
+            device=device,
             max_new_tokens=self.max_new_tokens,
             do_sample=True,
             temperature=self.temperature,
             pad_token_id=self.pad_token_id
         )
     
-    def generate(self, messages, continue_final_message=False):
+    def generate(self, messages):
         """Generate response from messages"""
         try:
-            response = self.pipe(messages, continue_final_message=continue_final_message)
+            response = self.pipe(messages)
             if isinstance(response, list) and len(response) > 0:
                 generated_text = response[0].get('generated_text', '')[-1]
                 assert generated_text.get("role") == "assistant"
@@ -59,13 +60,10 @@ class CAIProcessor:
     """Handles Constitutional AI critique and revision process"""
     
     CRITIQUE_SYSTEM_PROMPT = """
-    You are a helpful critic who identifies potential issues in responses. Output purely your 
-    critiques with no other introduction.
-    """
-    
-    REVISION_SYSTEM_PROMPT = """
-    You are a helpful assistant who improves responses based on feedback. Keep answers succinct and 
-    output purely your revised answer without any introduction or summary.
+    You are a helpful editor who identifies potential issues in responses, and helps revise them. 
+    Help fill out the requests for critiques and revisions. ONLY output your critiques and revised
+    responses. There is no need to start with "Certainly! Here is an answer: ...". Just go straight
+    into your answer
     """
     
     def __init__(self, llm, constitution, num_revisions=1):
@@ -73,24 +71,11 @@ class CAIProcessor:
         self.constitution = constitution
         self.num_revisions = num_revisions
     
-    def _generate_critique(self, history, response, critique_request):
+    def _generate(self, history, revision_messages):
         """Generate critique of the response using constitutional principles"""
         messages = [
             {"role": "system", "content": self.CRITIQUE_SYSTEM_PROMPT}
-        ] + self.constitution.few_shot_revisions() + history + [
-            {"role": "assistant", "content": response},
-            {"role": "user", "content": f"Critique request: {critique_request}"}
-        ]
-        return self.llm.generate(messages)
-    
-    def _generate_revision(self, history, initial_response, critique, revision_request):
-        """Generate revised response based on the critique"""
-        messages = [
-            {"role": "system", "content": self.REVISION_SYSTEM_PROMPT}
-        ] + self.constitution.few_shot_revisions() + history + [
-            {"role": "assistant", "content": initial_response},
-            {"role": "user", "content": f"Critique: {critique}\n\nRevision request: {revision_request}"}
-        ]
+        ] + self.constitution.few_shot_revisions() + history + revision_messages
         return self.llm.generate(messages)
     
     def revise_response(self, history, initial_response):
@@ -100,20 +85,23 @@ class CAIProcessor:
         revision_requests, revisions = [], []
         
         for _ in range(self.num_revisions):
+            revision_messages = [{"role": "assistant", "content": revised_response}]
+
             # Get principle for this revision
             principle = self.constitution.sample_principle()
             critique_request = principle["critique"]
             revision_request = principle["revision"]
             
             # Generate critique
-            critique = self._generate_critique(history, revised_response, critique_request)
+            revision_messages.append({"role": "user", "content": critique_request})
+            critique = self._generate(history, revision_messages)
+            revision_messages.append({"role": "assistant", "content": critique})
             critique_requests.append(critique_request)
             critiques.append(critique)
             
             # Generate revision
-            revised_response = self._generate_revision(
-                history, revised_response, critique, revision_request
-            )
+            revision_messages.append({"role": "user", "content": revision_request})
+            revised_response = self._generate(history, revision_messages)
             revision_requests.append(revision_request)
             revisions.append(revised_response)
         
@@ -134,17 +122,37 @@ class ConversationGenerator:
     """
     
     STUDENT_SYSTEM_PROMPT = """
-    You are a student who is trying to learn about a topic. You can imagine that you are 
-    working on a homework or reviewing the material from a class, and you are trying to resolve 
-    your confusion along with common misconceptions about a concept. Given a conversation, you should
+    You are a helpful assistant who tries to emulate reponses that a student would give. 
+    The student is trying to learn about a topic, and you can imagine that you are 
+    working on a homework or reviewing the material from a class. They are trying to resolve 
+    their confusion along with common misconceptions about a concept. Given a conversation, you should
     generate the student's response.
     """
+
+    STUDENT_PROMPT = """
+    What does the student say next?
+    """
+
+    DEFAULT_STUDENT_RESPONSE = "I am still confused"
     
     def __init__(self, llm: LLM, cai_processor: CAIProcessor, num_turns=5):
         self.llm = llm
         self.cai_processor = cai_processor
         self.num_turns = num_turns
         self.few_shot_dialogues = cai_processor.constitution.few_shot_dialogues
+
+    def _format_prompt(self, messages):
+        dialogue = "Conversation:"
+        for message in messages:
+            if message["role"] == "user":
+                role = "student"
+            else:
+                role = "teacher"
+            dialogue += f"{role}: {message['content']}\n"
+
+        dialogue += "\n" + self.STUDENT_PROMPT
+        
+        return dialogue
     
     def _generate_teacher_response(self, messages):
         """Generate the teacher's response to the question"""
@@ -155,12 +163,23 @@ class ConversationGenerator:
     
     def _generate_student_question(self, messages):
         """Generate follow-up student question based on conversation history"""
+        
+        # Format few shot examples
+        few_shot_examples = []
+        for dialogue in self.few_shot_dialogues():
+            prompt = self._format_prompt(dialogue[:-1])
+            few_shot_examples.append({"role": "user", "content": prompt})
+            few_shot_examples.append({"role": "assistant", "content": dialogue[-1]["content"]})
+
+        # Stitch together the full conversation context
         student_messages = [
             {"role": "system", "content": self.STUDENT_SYSTEM_PROMPT}
-        ] + self.few_shot_dialogues() + messages + [
-            {"role": "user", "content": ""}
+        ] + few_shot_examples + [
+            {"role": "user", "content": self._format_prompt(messages)}
         ]
-        return self.llm.generate(student_messages, continue_final_message=True)
+        
+        response = self.llm.generate(student_messages)
+        return response if response else self.DEFAULT_STUDENT_RESPONSE
     
     def generate_conversation(self, initial_question, category):
         """Generate a multi-turn conversation with CAI refinement"""
@@ -245,6 +264,7 @@ def process_batch(examples, conversation_generator):
 
 def main():
     logger.info("Starting SFT dataset generation...")
+    logger.info(f"Using device: {device}")
     
     # Initialize components
     constitution = Constitution(stage="sl")

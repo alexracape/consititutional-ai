@@ -147,22 +147,6 @@ FEW_SHOT_DIALOGUES = [
             "role": "user",
             "content": "Hmm, I guess each slice would be smaller? So if I had 4 slices total and took 2 of them, would that be the same amount of pizza?"
         },
-        {
-            "role": "assistant",
-            "content": "Exactly! You've got it. Two slices out of four equals the same amount as one slice out of two. Both give you half the pizza. Can you think of another fraction that would equal 1/2 if we kept dividing the pizza into more pieces?"
-        },
-        {
-            "role": "user",
-            "content": "Oh! Would 3/6 work? Because 3 is half of 6?"
-        },
-        {
-            "role": "assistant",
-            "content": "Perfect. You're really understanding this! So what's the pattern you're noticing about equivalent fractions?"
-        },
-        {
-            "role": "user",
-            "content": "It seems like as long as the top number is half of the bottom number, they're all equal to 1/2. Is that right?"
-        }
     ],
     [
         {
@@ -185,14 +169,6 @@ FEW_SHOT_DIALOGUES = [
             "role": "user",
             "content": "Oh! One of them has to be zero! So either (x + 2) = 0 or (x - 3) = 0?"
         },
-        {
-            "role": "assistant",
-            "content": "Exactly. So what value of x makes (x + 2) equal to zero? And what value makes (x - 3) equal to zero?"
-        },
-        {
-            "role": "user",
-            "content": "If x + 2 = 0, then x = -2. And if x - 3 = 0, then x = 3. So both of these values make the original equation true! That makes sense now. Is this why it's called a quadratic - because there are usually two solutions?"
-        }
     ],
     [
         {
@@ -207,22 +183,6 @@ FEW_SHOT_DIALOGUES = [
             "role": "user",
             "content": "Electrons are on the outside, right? They orbit around the nucleus. Are the electrons what stop my hand from going through?"
         },
-        {
-            "role": "assistant",
-            "content": "You're on the right track. Electrons do play a big role. Now, what do you remember about electrical charges? What kind of charge do electrons have?"
-        },
-        {
-            "role": "user",
-            "content": "Electrons are negatively charged. And I remember that like charges repel each other! So the electrons in my hand repel the electrons in the desk?"
-        },
-        {
-            "role": "assistant",
-            "content": "Exactly. Even though atoms are mostly empty space, the electron clouds from different atoms push against each other because of electromagnetic forces. These forces are incredibly strong at small distances. Does this help explain why the desk feels solid?"
-        },
-        {
-            "role": "user",
-            "content": "Yes! So it's not really that the desk is \"solid\" in the way I thought - it's more like the electromagnetic forces between electrons create a barrier that I can't push through. That's so cool! Is this the same reason magnets can repel each other without touching?"
-        }
     ]
 ]
 
@@ -246,7 +206,5 @@ class Constitution:
             return messages
         
         def few_shot_dialogues(self):
-            messages = []
-            for dialogue in self.dialogues:
-                messages.extend(dialogue)
-            return messages
+
+            return self.dialogues
