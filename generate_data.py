@@ -60,22 +60,81 @@ class CAIProcessor:
     """Handles Constitutional AI critique and revision process"""
     
     CRITIQUE_SYSTEM_PROMPT = """
-    You are a helpful editor who identifies potential issues in responses, and helps revise them. 
-    Help fill out the requests for critiques and revisions. ONLY output your critiques and revised
-    responses. There is no need to start with "Certainly! Here is an answer: ...". Just go straight
-    into your answer
+    You are a helpful critique who identifies potential issues in responses, so that they can be
+    improved. ONLY output your critiques with no prelude or justification.
+    """
+
+    REVISION_SYSTEM_PROMPT = """
+    You are a helpful editor who makes revisions to responses based on critiques. 
+    ONLY output your critiques with no prelude or justification.
     """
     
     def __init__(self, llm, constitution, num_revisions=1):
         self.llm = llm
         self.constitution = constitution
         self.num_revisions = num_revisions
-    
-    def _generate(self, history, revision_messages):
-        """Generate critique of the response using constitutional principles"""
-        messages = [
-            {"role": "system", "content": self.CRITIQUE_SYSTEM_PROMPT}
-        ] + self.constitution.few_shot_revisions() + history + revision_messages
+
+    def _format_dialogue_prompt(self, dialogue, include_revision=False):
+        """Format a dialogue into a prompt string"""
+        parts = [
+            f"question: {dialogue[0]['content']}",
+            f"initial response: {dialogue[1]['content']}",
+            f"critique request: {dialogue[2]['content']}",
+        ]
+        
+        if include_revision:
+            parts.extend([
+                f"critique: {dialogue[3]['content']}",
+                f"revision request: {dialogue[4]['content']}",
+            ])
+        
+        return "\n".join(parts)
+
+    def _add_few_shot_examples(self, messages, dialogues, include_revision=False):
+        """Add few-shot examples to messages list"""
+        response_idx = 3 if not include_revision else 5
+        
+        for dialogue in dialogues:
+            prompt = self._format_dialogue_prompt(dialogue, include_revision)
+            messages.append({"role": "user", "content": prompt})
+            messages.append({"role": "assistant", "content": dialogue[response_idx]['content']})
+
+    def generate_critique(self, history, critique_request):
+        """Format chat history and few-shot examples into complete prompt"""
+        messages = [{"role": "system", "content": self.CRITIQUE_SYSTEM_PROMPT}]
+        
+        # Add few-shot examples
+        dialogues = self.constitution.few_shot_revisions()
+        self._add_few_shot_examples(messages, dialogues, include_revision=False)
+        
+        # Add current query
+        prompt = self._format_dialogue_prompt([
+            history[-2],
+            history[-1],
+            {"content": critique_request},
+        ])
+        messages.append({"role": "user", "content": prompt})
+        
+        return self.llm.generate(messages)
+
+    def generate_revision(self, history, critique_request, critique, revision_request):
+        """Format chat history and few-shot examples into complete prompt"""
+        messages = [{"role": "system", "content": self.REVISION_SYSTEM_PROMPT}]
+        
+        # Add few-shot examples
+        dialogues = self.constitution.few_shot_revisions()
+        self._add_few_shot_examples(messages, dialogues, include_revision=True)
+        
+        # Add current query
+        prompt = self._format_dialogue_prompt([
+            history[-2],
+            history[-1],
+            {"content": critique_request},
+            {"content": critique},
+            {"content": revision_request},
+        ], include_revision=True)
+        messages.append({"role": "user", "content": prompt})
+        
         return self.llm.generate(messages)
     
     def revise_response(self, history, initial_response):
@@ -85,7 +144,6 @@ class CAIProcessor:
         revision_requests, revisions = [], []
         
         for _ in range(self.num_revisions):
-            revision_messages = [{"role": "assistant", "content": revised_response}]
 
             # Get principle for this revision
             principle = self.constitution.sample_principle()
@@ -93,15 +151,12 @@ class CAIProcessor:
             revision_request = principle["revision"]
             
             # Generate critique
-            revision_messages.append({"role": "user", "content": critique_request})
-            critique = self._generate(history, revision_messages)
-            revision_messages.append({"role": "assistant", "content": critique})
+            critique = self._generate_critique(history, critique_request)
             critique_requests.append(critique_request)
             critiques.append(critique)
             
             # Generate revision
-            revision_messages.append({"role": "user", "content": revision_request})
-            revised_response = self._generate(history, revision_messages)
+            revised_response = self._generate_revision(history, critique_request, critique, revision_request)
             revision_requests.append(revision_request)
             revisions.append(revised_response)
         
