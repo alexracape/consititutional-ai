@@ -5,10 +5,10 @@
 #
 #SBATCH --account=edu
 #SBATCH --job-name=CAIDataGeneration
-#SBATCH -c 1                      # The number of cpu cores to use
-#SBATCH -t 0-0:30                 # Runtime in D-HH:MM
-#SBATCH --mem-per-cpu=5gb         # The memory the job will use per cpu core
-#SBATCH --gres=gpu     
+#SBATCH -c 4                      # Increase CPU cores for better performance
+#SBATCH -t 0-2:00                 # Increase time limit (2 hours)
+#SBATCH --mem=32gb                # Total memory for the job (better than per-cpu)
+#SBATCH --gres=gpu:1              # Specify 1 GPU explicitly
 
 module load anaconda
 
