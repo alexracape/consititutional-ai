@@ -12,6 +12,8 @@
 
 module load anaconda
 
+export HF_TOKEN=$(cat ~/.hf_token)
+
 #Command to execute Python program
 python generate_data.py
 

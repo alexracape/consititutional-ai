@@ -12,7 +12,7 @@ NEW_DATASET = "aracape/cai-education"
 NUM_REVISIONS = 1
 NUM_TO_GENERATE = 2
 NUM_TURNS = 2
-BATCH_SIZE = 2
+BATCH_SIZE = 8
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,6 +44,7 @@ class LLM:
             max_new_tokens=self.max_new_tokens,
             do_sample=True,
             temperature=self.temperature,
+            dtype=torch.float16,
         )
     
     def generate(self, messages):
