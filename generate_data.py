@@ -12,9 +12,9 @@ from constitution import Constitution
 MODEL = "Qwen/Qwen2.5-3B-Instruct"
 NEW_DATASET = "aracape/cai-education"
 NUM_REVISIONS = 1
-NUM_TO_GENERATE = 3
-NUM_TURNS = 4
-BATCH_SIZE = 3
+NUM_TO_GENERATE = 2
+NUM_TURNS = 2
+BATCH_SIZE = 2
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,19 +22,18 @@ logger = logging.getLogger(__name__)
 if torch.cuda.is_available():
     device = 0  # Use first CUDA GPU
 elif torch.backends.mps.is_available():
-    device = "mps"  # Use Apple Silicon GPU
+    device = "mps"
 else:
-    device = -1  # Use CPU
+    device = -1
 
 
 class LLM:
     """Handles all LLM inference operations"""
     
-    def __init__(self, model_name, max_new_tokens=512, temperature=0.6, pad_token_id=50256):
+    def __init__(self, model_name, max_new_tokens=512, temperature=0.5):
         self.model_name = model_name
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
-        self.pad_token_id = pad_token_id
         self.pipe = self._initialize_pipeline()
     
     def _initialize_pipeline(self):
@@ -47,7 +46,6 @@ class LLM:
             max_new_tokens=self.max_new_tokens,
             do_sample=True,
             temperature=self.temperature,
-            pad_token_id=self.pad_token_id
         )
     
     def generate(self, messages):
@@ -107,43 +105,43 @@ class CAIProcessor:
             messages.append({"role": "user", "content": prompt})
             messages.append({"role": "assistant", "content": dialogue[response_idx]['content']})
 
-    def _generate_critique(self, history, critique_request):
+    def _generate_critique(self, history, initial_response, critique_request):
         """Format chat history and few-shot examples into complete prompt"""
-        messages = [{"role": "system", "content": self.CRITIQUE_SYSTEM_PROMPT}]
+        critique_messages = [{"role": "system", "content": self.CRITIQUE_SYSTEM_PROMPT}]
         
         # Add few-shot examples
         dialogues = self.constitution.few_shot_revisions()
-        self._add_few_shot_examples(messages, dialogues, include_revision=False)
+        self._add_few_shot_examples(critique_messages, dialogues, include_revision=False)
         
         # Add current query
         prompt = self._format_dialogue_prompt([
-            history[-2],
             history[-1],
+            {"content": initial_response},
             {"content": critique_request},
         ])
-        messages.append({"role": "user", "content": prompt})
+        critique_messages.append({"role": "user", "content": prompt})
         
-        return self.llm.generate(messages)
+        return self.llm.generate(critique_messages)
 
-    def _generate_revision(self, history, critique_request, critique, revision_request):
+    def _generate_revision(self, history, initial_response, critique_request, critique, revision_request):
         """Format chat history and few-shot examples into complete prompt"""
-        messages = [{"role": "system", "content": self.REVISION_SYSTEM_PROMPT}]
+        revision_messages = [{"role": "system", "content": self.REVISION_SYSTEM_PROMPT}]
         
         # Add few-shot examples
         dialogues = self.constitution.few_shot_revisions()
-        self._add_few_shot_examples(messages, dialogues, include_revision=True)
+        self._add_few_shot_examples(revision_messages, dialogues, include_revision=True)
         
         # Add current query
         prompt = self._format_dialogue_prompt([
-            history[-2],
             history[-1],
+            {"content": initial_response},
             {"content": critique_request},
             {"content": critique},
             {"content": revision_request},
         ], include_revision=True)
-        messages.append({"role": "user", "content": prompt})
+        revision_messages.append({"role": "user", "content": prompt})
         
-        return self.llm.generate(messages)
+        return self.llm.generate(revision_messages)
     
     def revise_response(self, history, initial_response):
         """Apply multiple rounds of critique and revision"""
@@ -159,12 +157,12 @@ class CAIProcessor:
             revision_request = principle["revision"]
             
             # Generate critique
-            critique = self._generate_critique(history, critique_request)
+            critique = self._generate_critique(history, initial_response, critique_request)
             critique_requests.append(critique_request)
             critiques.append(critique)
             
             # Generate revision
-            revised_response = self._generate_revision(history, critique_request, critique, revision_request)
+            revised_response = self._generate_revision(history, initial_response, critique_request, critique, revision_request)
             revision_requests.append(revision_request)
             revisions.append(revised_response)
         
@@ -331,7 +329,7 @@ def main():
     
     # Initialize components
     constitution = Constitution(stage="sl")
-    llm = LLM(MODEL, max_new_tokens=512, temperature=0.3, pad_token_id=50256)
+    llm = LLM(MODEL, max_new_tokens=512, temperature=0.3)
     cai_processor = CAIProcessor(llm, constitution, num_revisions=NUM_REVISIONS)
     conversation_generator = ConversationGenerator(llm, cai_processor, num_turns=NUM_TURNS)
     

@@ -192,19 +192,13 @@ class Constitution:
         def __init__(self, stage):
             self.stage = stage
             self.principles = RL_PRINCIPLES if stage == "rl" else SL_PRINCIPLES
-            self.revisions = FEW_SHOT_REVISIONS
-            self.dialogues = FEW_SHOT_DIALOGUES
-        
 
         def sample_principle(self):
             return random.choice(self.principles)
 
         def few_shot_revisions(self):
-            messages = []
-            for dialogue in self.revisions:
-                messages.extend(dialogue)
-            return messages
+            return FEW_SHOT_REVISIONS
         
         def few_shot_dialogues(self):
-
-            return self.dialogues
+            return FEW_SHOT_DIALOGUES
+            
