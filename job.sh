@@ -1,6 +1,7 @@
 #!/bin/sh
 #
-# Simple "Hello World" submit script for Slurm.
+# Based on the simple "Hello World" submit script for Slurm.
+# Runs the job to generate a dataset and push to HF
 #
 #SBATCH --account=edu
 #SBATCH --job-name=CAIDataGeneration
@@ -11,7 +12,7 @@
 
 module load anaconda
 
-source activate myenv
-
 #Command to execute Python program
 python generate_data.py
+
+#End of script

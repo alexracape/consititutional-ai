@@ -1,11 +1,9 @@
 """The goal is to create a dataset for SFT based on critiques and revisions"""
 import logging
-from tqdm import tqdm
-import pandas as pd
 
 import torch
-from transformers import pipeline, infer_device
-from datasets import load_dataset, Dataset
+from transformers import pipeline
+from datasets import load_dataset
 from constitution import Constitution
 
 
