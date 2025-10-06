@@ -7,12 +7,12 @@ from datasets import load_dataset
 from constitution import Constitution
 
 
-MODEL = "Qwen/Qwen2.5-3B-Instruct"
+MODEL = "meta-llama/Llama-4-Maverick-17B-128E-Instruct"
 NEW_DATASET = "aracape/cai-education"
 NUM_REVISIONS = 1
 NUM_TO_GENERATE = 2
 NUM_TURNS = 2
-BATCH_SIZE = 8
+BATCH_SIZE = 1
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
