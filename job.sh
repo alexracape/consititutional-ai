@@ -6,18 +6,24 @@
 #SBATCH --account=edu
 #SBATCH --job-name=CAIDataGeneration
 #SBATCH -c 4                      # Increase CPU cores for better performance
-#SBATCH -t 0-2:00                 # Increase time limit (2 hours)
-#SBATCH --mem=32gb                # Total memory for the job (better than per-cpu)
+#SBATCH -t 0-1:00                 # Increase time limit (2 hours)
+#SBATCH --mem=64gb                # Total memory for the job (better than per-cpu)
 #SBATCH --gres=gpu:1              # Specify 1 GPU explicitly
-#SBATCH --constraint=h100         # Prefer H100
 
 
 module load anaconda
 
 export HF_TOKEN=$(cat ~/.hf_token)
+export HF_HOME="/insomnia001/depts/edu/COMS-E6998-012/abr2184/hf"
+export HF_HUB_CACHE="$HF_HOME/hub"
+export HF_HUB_ENABLE_HF_TRANSFER=1
+mkdir -p "$HF_HUB_CACHE"
 
+source /insomnia001/shared/apps/anaconda/2023.09/etc/profile.d/conda.sh
+conda activate caienv
 
-#Command to execute Python program
+nvidia-smi
+
 python generate_data.py
 
 #End of script

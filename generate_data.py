@@ -7,7 +7,7 @@ from datasets import load_dataset
 from constitution import Constitution
 
 
-MODEL = "meta-llama/Llama-4-Maverick-17B-128E-Instruct"
+MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 NEW_DATASET = "aracape/cai-education"
 NUM_REVISIONS = 1
 NUM_TO_GENERATE = 2
