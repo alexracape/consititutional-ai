@@ -1,5 +1,6 @@
 """The goal is to create a dataset for SFT based on critiques and revisions"""
 import logging
+import time
 
 import torch
 from transformers import pipeline
@@ -10,8 +11,8 @@ from constitution import Constitution
 MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 NEW_DATASET = "aracape/cai-education"
 NUM_REVISIONS = 1
-NUM_TO_GENERATE = 2
-NUM_TURNS = 2
+NUM_TO_GENERATE = 100
+NUM_TURNS = 5
 BATCH_SIZE = 1
 
 logging.basicConfig(level=logging.INFO)
@@ -243,6 +244,7 @@ class ConversationGenerator:
     
     def generate_conversation(self, initial_question, category):
         """Generate a multi-turn conversation with CAI refinement"""
+        id = hash(initial_question)
         results = []
         messages = []
         
@@ -268,6 +270,7 @@ class ConversationGenerator:
             
             # Store this turn's data
             results.append({
+                'conversation_id': id,
                 'question': question,
                 'messages': messages.copy(),
                 'category': category,
@@ -294,6 +297,7 @@ def process_example(example, conversation_generator):
 def process_batch(examples, conversation_generator):
     """Process a batch of examples"""
     results = {
+        'conversation_id': [],
         'question': [],
         'messages': [],
         'category': [],
@@ -325,6 +329,7 @@ def process_batch(examples, conversation_generator):
 def main():
     logger.info("Starting SFT dataset generation...")
     logger.info(f"Using device: {device}")
+    start = time.perf_counter()
     
     # Initialize components
     constitution = Constitution(stage="sl")
@@ -361,6 +366,13 @@ def main():
     except Exception as e:
         logger.error(f"Error pushing to hub: {e}")
         logger.info("Dataset saved locally in ./sft_dataset_local")
+    finally:
+        elapsed = time.perf_counter() - start
+        datapoints = len(processed_dataset)
+        logger.info(
+            "JOB SUMMARY | datapoints=%d | rounds_per_conversation=%d | total_time=%.2fs",
+            datapoints, NUM_TURNS, elapsed
+        )
 
 
 if __name__ == "__main__":

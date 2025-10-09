@@ -6,7 +6,7 @@
 #SBATCH --account=edu
 #SBATCH --job-name=CAIDataGeneration
 #SBATCH -c 4                      # Increase CPU cores for better performance
-#SBATCH -t 0-1:00                 # Increase time limit (2 hours)
+#SBATCH -t 0-12:00                 # Increase time limit (12 hours)
 #SBATCH --mem=64gb                # Total memory for the job (better than per-cpu)
 #SBATCH --gres=gpu:1              # Specify 1 GPU explicitly
 
