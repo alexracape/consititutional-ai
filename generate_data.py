@@ -9,11 +9,11 @@ from constitution import Constitution
 
 
 MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-NEW_DATASET = "aracape/cai-education"
+NEW_DATASET = "aracape/cai-education-single-turn"
 NUM_REVISIONS = 1
-NUM_TO_GENERATE = 100
-NUM_TURNS = 5
-BATCH_SIZE = 1
+NUM_TO_GENERATE = 10000
+NUM_TURNS = 1
+BATCH_SIZE = 4
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -67,12 +67,13 @@ class CAIProcessor:
     
     CRITIQUE_SYSTEM_PROMPT = """
     You are a helpful critique who identifies potential issues in responses, so that they can be
-    improved. ONLY output your critiques with no prelude or justification.
+    improved. It is possible that the response is good how it is. ONLY output your feedback with 
+    no prelude or justification.
     """
 
     REVISION_SYSTEM_PROMPT = """
     You are a helpful editor who makes revisions to responses based on critiques. 
-    ONLY output your critiques with no prelude or justification.
+    ONLY output your revised response with no prelude or justification.
     """
     
     def __init__(self, llm, constitution, num_revisions=1):
