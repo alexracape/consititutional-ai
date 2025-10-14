@@ -50,8 +50,9 @@ class LLM:
             max_new_tokens=self.max_new_tokens,
             do_sample=True,
             temperature=self.temperature,
-            dtype=torch.float16,
             model_kwaargs={
+                "load_in_8bit": True,
+                "device_map": "auto", 
                 "attn_implementation": "flash_attention_2"
             } if torch.cuda.is_available() else {}
         )

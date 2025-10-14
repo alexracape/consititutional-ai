@@ -9,7 +9,7 @@
 #SBATCH -t 0-12:00                # Increase time limit (12 hours)
 #SBATCH --mem=64gb                # Total memory for the job (better than per-cpu)
 #SBATCH --gres=gpu:1              # Specify 1 GPU explicitly
-#SBATCH --array=0-1               # Start with 2 GPUs 
+#SBATCH --array=0-1               # Start with 2 jobs 
 
 
 module load anaconda
