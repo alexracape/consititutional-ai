@@ -1,6 +1,7 @@
 """The goal is to create a dataset for SFT based on critiques and revisions"""
 import logging
 import time
+import argparse
 
 import torch
 from transformers import pipeline, AutoTokenizer
@@ -9,11 +10,11 @@ from constitution import Constitution
 
 
 MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-NEW_DATASET = "aracape/cai-education-single-turn"
 NUM_REVISIONS = 1
 NUM_TO_GENERATE = 2500
 NUM_TURNS = 1
-BATCH_SIZE = 8
+BATCH_SIZE = 16
+OFFSET = 5000  # Previously generated data points
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -50,6 +51,9 @@ class LLM:
             do_sample=True,
             temperature=self.temperature,
             dtype=torch.float16,
+            model_kwaargs={
+                "attn_implementation": "flash_attention_2"
+            } if torch.cuda.is_available() else {}
         )
     
     def generate(self, messages):
@@ -195,10 +199,7 @@ class ConversationGenerator:
     generate the student's response.
     """
 
-    STUDENT_PROMPT = """
-    What does the student say next?
-    """
-
+    STUDENT_PROMPT = "What does the student say next?"
     DEFAULT_STUDENT_RESPONSE = "I am still confused"
     
     def __init__(self, llm: LLM, cai_processor: CAIProcessor, num_turns=5):
@@ -332,6 +333,12 @@ def process_batch(examples, conversation_generator):
 
 
 def main():
+    # Get arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--job_id', type=int, default=0)
+    parser.add_argument('--num_jobs', type=int, default=1)
+    args = parser.parse_args()
+    
     logger.info("Starting SFT dataset generation...")
     logger.info(f"Using device: {device}")
     start = time.perf_counter()
@@ -346,10 +353,13 @@ def main():
     logger.info("Loading dataset...")
     dataset = load_dataset("SetFit/student-question-categories")
     
-    # Take a subset for testing
-    train_dataset = dataset['train'].select(range(NUM_TO_GENERATE, 2 * NUM_TO_GENERATE))
+    # Take a subset for this job
+    start_index = (args.job_id * NUM_TO_GENERATE) + OFFSET
+    end_index = start_index + NUM_TO_GENERATE
+    train_dataset = dataset['train'].select(range(start_index, end_index))
     logger.info(f"Processing {len(train_dataset)} examples...")
     
+    # Generate the actual data
     processed_dataset = train_dataset.map(
         lambda examples: process_batch(examples, conversation_generator),
         batched=True,
@@ -357,30 +367,20 @@ def main():
         desc="Generating responses and critiques",
         remove_columns=train_dataset.column_names
     )
-    
-    logger.info(f"Generated {len(processed_dataset)} examples")
-    
+        
     # Save backup locally
-    processed_dataset.save_to_disk("./sft_dataset_local")
+    logger.info(f"Generated {len(processed_dataset)} examples")
+    local_path = f"./sft_dataset_job_{args.job_id}"
+    processed_dataset.save_to_disk(local_path)
+    logger.info(f"Saved locally to {local_path}")
     
-    # Push to Hugging Face Hub
-    existing_dataset = load_dataset(NEW_DATASET)
-    processed_dataset = concatenate_datasets([existing_dataset['train'], processed_dataset])
-     
-    logger.info("Pushing to Hugging Face Hub...")
-    try:
-        processed_dataset.push_to_hub(NEW_DATASET, private=False)
-        logger.info(f"Successfully pushed dataset to {NEW_DATASET}")
-    except Exception as e:
-        logger.error(f"Error pushing to hub: {e}")
-        logger.info("Dataset saved locally in ./sft_dataset_local")
-    finally:
-        elapsed = time.perf_counter() - start
-        datapoints = len(processed_dataset)
-        logger.info(
-            "JOB SUMMARY | datapoints=%d | rounds_per_conversation=%d | total_time=%.2fs",
-            datapoints, NUM_TURNS, elapsed
-        )
+    # Log a summary of the job
+    elapsed = time.perf_counter() - start
+    datapoints = len(processed_dataset)
+    logger.info(
+        "JOB SUMMARY | ID: %d | datapoints=%d | rounds_per_conversation=%d | total_time=%.2fs",
+        args.job_id, datapoints, NUM_TURNS, elapsed
+    )
 
 
 if __name__ == "__main__":
