@@ -3,17 +3,17 @@ import logging
 import time
 
 import torch
-from transformers import pipeline
-from datasets import load_dataset
+from transformers import pipeline, AutoTokenizer
+from datasets import load_dataset, concatenate_datasets
 from constitution import Constitution
 
 
 MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 NEW_DATASET = "aracape/cai-education-single-turn"
 NUM_REVISIONS = 1
-NUM_TO_GENERATE = 10000
+NUM_TO_GENERATE = 2500
 NUM_TURNS = 1
-BATCH_SIZE = 4
+BATCH_SIZE = 8
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,9 +38,13 @@ class LLM:
     def _initialize_pipeline(self):
         """Initialize the text generation pipeline"""
         logger.info(f"Initializing pipeline for {self.model_name}...")
+        tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "left"
         return pipeline(
             "text-generation",
             model=self.model_name,
+            tokenizer=tokenizer,
             device=device,
             max_new_tokens=self.max_new_tokens,
             do_sample=True,
@@ -343,7 +347,7 @@ def main():
     dataset = load_dataset("SetFit/student-question-categories")
     
     # Take a subset for testing
-    train_dataset = dataset['train'].select(range(NUM_TO_GENERATE))
+    train_dataset = dataset['train'].select(range(NUM_TO_GENERATE, 2 * NUM_TO_GENERATE))
     logger.info(f"Processing {len(train_dataset)} examples...")
     
     processed_dataset = train_dataset.map(
@@ -360,6 +364,9 @@ def main():
     processed_dataset.save_to_disk("./sft_dataset_local")
     
     # Push to Hugging Face Hub
+    existing_dataset = load_dataset(NEW_DATASET)
+    processed_dataset = concatenate_datasets([existing_dataset['train'], processed_dataset])
+     
     logger.info("Pushing to Hugging Face Hub...")
     try:
         processed_dataset.push_to_hub(NEW_DATASET, private=False)
