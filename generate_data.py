@@ -13,18 +13,18 @@ MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 NUM_REVISIONS = 1
 NUM_TO_GENERATE = 2500
 NUM_TURNS = 1
-BATCH_SIZE = 16
+BATCH_SIZE = 8
 OFFSET = 5000  # Previously generated data points
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 if torch.cuda.is_available():
-    device = 0  # Use first CUDA GPU
+    device = "cuda"
 elif torch.backends.mps.is_available():
     device = "mps"
 else:
-    device = -1
+    device = "cpu"
 
 
 class LLM:
@@ -50,7 +50,7 @@ class LLM:
             max_new_tokens=self.max_new_tokens,
             do_sample=True,
             temperature=self.temperature,
-            model_kwaargs={
+            model_kwargs={
                 "load_in_8bit": True,
                 "device_map": "auto", 
                 "attn_implementation": "flash_attention_2"
