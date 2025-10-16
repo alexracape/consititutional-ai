@@ -4,7 +4,7 @@ import time
 import argparse
 
 import torch
-from transformers import pipeline, AutoTokenizer
+from transformers import pipeline, AutoTokenizer, BitsAndBytesConfig
 from datasets import load_dataset, concatenate_datasets
 from constitution import Constitution
 
@@ -42,19 +42,23 @@ class LLM:
         tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.padding_side = "left"
+
+        quantization_config = BitsAndBytesConfig(
+            load_in_8bit=True,
+        ) if torch.cuda.is_available() else None
+        
         return pipeline(
             "text-generation",
             model=self.model_name,
             tokenizer=tokenizer,
-            device=device,
             max_new_tokens=self.max_new_tokens,
             do_sample=True,
             temperature=self.temperature,
             model_kwargs={
-                "load_in_8bit": True,
+                "quantization_config": quantization_config,
                 "device_map": "auto", 
                 "attn_implementation": "flash_attention_2"
-            } if torch.cuda.is_available() else {}
+            } if torch.cuda.is_available() else {"device": device}
         )
     
     def generate(self, messages):
