@@ -43,9 +43,9 @@ class LLM:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.padding_side = "left"
 
-        quantization_config = BitsAndBytesConfig(
-            load_in_8bit=True,
-        ) if torch.cuda.is_available() else None
+        # quantization_config = BitsAndBytesConfig(
+        #     load_in_8bit=True,
+        # ) if torch.cuda.is_available() else None
         
         return pipeline(
             "text-generation",
@@ -53,9 +53,9 @@ class LLM:
             tokenizer=tokenizer,
             max_new_tokens=self.max_new_tokens,
             do_sample=True,
+            dtype=torch.float16,
             temperature=self.temperature,
             model_kwargs={
-                "quantization_config": quantization_config,
                 "device_map": "auto", 
                 "attn_implementation": "flash_attention_2"
             } if torch.cuda.is_available() else {"device": device}
