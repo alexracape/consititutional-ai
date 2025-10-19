@@ -7,9 +7,9 @@
 #SBATCH --job-name=CAIDataGeneration
 #SBATCH -c 4                      # Increase CPU cores for better performance
 #SBATCH -t 0-12:00                # Increase time limit (12 hours)
-#SBATCH --mem=128gb                # Total memory for the job (better than per-cpu)
+#SBATCH --mem=64gb                # Total memory for the job (better than per-cpu)
 #SBATCH --gres=gpu:1              # Specify 1 GPU explicitly
-#SBATCH --array=1-1               # Start with 2 jobs 
+#SBATCH --array=0-1               # Start with 2 jobs 
 
 
 module load anaconda

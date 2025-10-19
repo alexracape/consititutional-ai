@@ -73,7 +73,7 @@ class LLM:
 
     def generate_batch(self, messages_list):
         try:
-            responses = self.pipe(messages_list)
+            responses = self.pipe(messages_list, batch_size=len(messages_list))
             results = []
             for response in responses:
                 if isinstance(response, list) and len(response) > 0:
