@@ -9,7 +9,7 @@ from datasets import load_dataset, concatenate_datasets
 from constitution import Constitution
 
 
-MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+MODEL = "meta-llama/Llama-3.2-1B-Instruct"
 NUM_REVISIONS = 1
 NUM_TO_GENERATE = 2500
 NUM_TURNS = 1
@@ -43,10 +43,10 @@ class LLM:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.padding_side = "left"
 
-        # quantization_config = BitsAndBytesConfig(
-        #     load_in_8bit=True,
-        # ) if torch.cuda.is_available() else None
-        
+        model_kwargs = {"device_map": "auto"}
+        # if torch.cuda.is_available():
+        #     model_kwargs.update({"attn_implementation": "flash_attention_2"})
+
         return pipeline(
             "text-generation",
             model=self.model_name,
@@ -55,10 +55,7 @@ class LLM:
             do_sample=True,
             dtype=torch.float16,
             temperature=self.temperature,
-            model_kwargs={
-                "device_map": "auto", 
-                "attn_implementation": "flash_attention_2"
-            } if torch.cuda.is_available() else {"device": device}
+            model_kwargs=model_kwargs
         )
     
     def generate(self, messages):
@@ -73,6 +70,24 @@ class LLM:
         except Exception as e:
             logger.error(f"Error generating response: {e}")
             return ""
+
+    def generate_batch(self, messages_list):
+        try:
+            responses = self.pipe(messages_list)
+            results = []
+            for response in responses:
+                if isinstance(response, list) and len(response) > 0:
+                    generated_text = response[0].get('generated_text', '')[-1]
+                    if generated_text.get("role") == "assistant":
+                        results.append(generated_text.get("content"))
+                    else:
+                        results.append("")
+                else:
+                    results.append("")
+            return results
+        except Exception as e:
+            logger.error(f"Error generating batch responses: {e}")
+            return [""] * len(messages_list)
 
 
 class CAIProcessor:
@@ -118,9 +133,10 @@ class CAIProcessor:
             prompt = self._format_dialogue_prompt(dialogue, include_revision)
             messages.append({"role": "user", "content": prompt})
             messages.append({"role": "assistant", "content": dialogue[response_idx]['content']})
-
-    def _generate_critique(self, history, initial_response, critique_request):
-        """Format chat history and few-shot examples into complete prompt"""
+            
+    
+    def _build_critique_prompt(self, history, initial_response, critique_request):
+        """Build critique prompt with few-shot examples"""
         critique_messages = [{"role": "system", "content": self.CRITIQUE_SYSTEM_PROMPT}]
         
         # Add few-shot examples
@@ -135,10 +151,10 @@ class CAIProcessor:
         ])
         critique_messages.append({"role": "user", "content": prompt})
         
-        return self.llm.generate(critique_messages)
+        return critique_messages
 
-    def _generate_revision(self, history, initial_response, critique_request, critique, revision_request):
-        """Format chat history and few-shot examples into complete prompt"""
+    def _build_revision_prompt(self, history, initial_response, critique_request, critique, revision_request):
+        """Build revision prompt with few-shot examples"""
         revision_messages = [{"role": "system", "content": self.REVISION_SYSTEM_PROMPT}]
         
         # Add few-shot examples
@@ -155,38 +171,61 @@ class CAIProcessor:
         ], include_revision=True)
         revision_messages.append({"role": "user", "content": prompt})
         
-        return self.llm.generate(revision_messages)
-    
-    def revise_response(self, history, initial_response):
-        """Apply multiple rounds of critique and revision"""
-        revised_response = initial_response
-        critique_requests, critiques = [], []
-        revision_requests, revisions = [], []
+        return revision_messages
+        
+    def revise_responses(self, histories, initial_responses):
+        """Apply multiple rounds of critique and revision to a batch of responses"""
+        batch_size = len(histories)
+        results = [
+            {
+                'critique_requests': [],
+                'critiques': [],
+                'revision_requests': [],
+                'revisions': [],
+                'revised_response': None
+            }
+            for _ in range(batch_size)
+        ]
         
         for _ in range(self.num_revisions):
-
-            # Get principle for this revision
-            principle = self.constitution.sample_principle()
-            critique_request = principle["critique"]
-            revision_request = principle["revision"]
+            # Get principles for all examples in batch
+            principles = [self.constitution.sample_principle() for _ in range(batch_size)]
+            critique_requests = [p["critique"] for p in principles]
+            revision_requests = [p["revision"] for p in principles]
             
-            # Generate critique
-            critique = self._generate_critique(history, initial_response, critique_request)
-            critique_requests.append(critique_request)
-            critiques.append(critique)
+            # Build critique prompts for batch
+            critique_prompts = [
+                self._build_critique_prompt(histories[i], initial_responses[i], critique_requests[i])
+                for i in range(batch_size)
+            ]
             
-            # Generate revision
-            revised_response = self._generate_revision(history, initial_response, critique_request, critique, revision_request)
-            revision_requests.append(revision_request)
-            revisions.append(revised_response)
+            # Generate critiques in batch
+            critiques = self.llm.generate_batch(critique_prompts)
+            
+            # Build revision prompts for batch
+            revision_prompts = [
+                self._build_revision_prompt(
+                    histories[i], 
+                    initial_responses[i], 
+                    critique_requests[i], 
+                    critiques[i], 
+                    revision_requests[i]
+                )
+                for i in range(batch_size)
+            ]
+            
+            # Generate revisions in batch
+            revisions = self.llm.generate_batch(revision_prompts)
+            
+            # Update the results data for each batch element
+            for i in range(batch_size):
+                results[i]['critique_requests'].append(critique_requests[i])
+                results[i]['critiques'].append(critiques[i])
+                results[i]['revision_requests'].append(revision_requests[i])
+                results[i]['revisions'].append(revisions[i])
+                results[i]['revised_response'] = revisions[i] 
         
-        return {
-            'revised_response': revised_response,
-            'critique_requests': critique_requests,
-            'critiques': critiques,
-            'revision_requests': revision_requests,
-            'revisions': revisions
-        }
+        return results
 
 
 class ConversationGenerator:
@@ -226,14 +265,15 @@ class ConversationGenerator:
         
         return dialogue
     
-    def _generate_teacher_response(self, messages):
+    def _generate_teacher_responses(self, messages_batch):
         """Generate the teacher's response to the question"""
-        teacher_messages = [
-            {"role": "system", "content": self.TEACHER_SYSTEM_PROMPT}
-        ] + messages
-        return self.llm.generate(teacher_messages)
+        teacher_prompts = [
+            [{"role": "system", "content": self.TEACHER_SYSTEM_PROMPT}] + messages
+            for messages in messages_batch
+        ]
+        return self.llm.generate_batch(teacher_prompts)
     
-    def _generate_student_question(self, messages):
+    def _generate_student_questions(self, messages_batch):
         """Generate follow-up student question based on conversation history"""
         
         # Format few shot examples
@@ -243,99 +283,97 @@ class ConversationGenerator:
             few_shot_examples.append({"role": "user", "content": prompt})
             few_shot_examples.append({"role": "assistant", "content": dialogue[-1]["content"]})
 
-        # Stitch together the full conversation context
-        student_messages = [
-            {"role": "system", "content": self.STUDENT_SYSTEM_PROMPT}
-        ] + few_shot_examples + [
-            {"role": "user", "content": self._format_prompt(messages)}
+        # Build prompts for batch
+        student_prompts = [
+            [{"role": "system", "content": self.STUDENT_SYSTEM_PROMPT}] + 
+            few_shot_examples + 
+            [{"role": "user", "content": self._format_prompt(messages)}]
+            for messages in messages_batch
         ]
         
-        response = self.llm.generate(student_messages)
-        return response if response else self.DEFAULT_STUDENT_RESPONSE
+        responses = self.llm.generate_batch(student_prompts)
+        return [r if r else self.DEFAULT_STUDENT_RESPONSE for r in responses]
     
-    def generate_conversation(self, initial_question, category):
-        """Generate a multi-turn conversation with CAI refinement"""
-        id = hash(initial_question)
-        results = []
-        messages = []
+    def generate_conversations(self, questions_and_categories):
+        batch_size = len(questions_and_categories)
+        conversations = [
+            {
+                'id': abs(hash(q)),
+                'question': q,
+                'category': cat,
+                'messages': [],
+            }
+            for q, cat in questions_and_categories
+        ]
+
+        results = {
+            'conversation_id': [],
+            'question': [],
+            'messages': [],
+            'category': [],
+            'initial_response': [],
+            'critique_requests': [],
+            'critiques': [],
+            'revision_requests': [],
+            'revisions': [],
+            'chosen': [],
+            'rejected': []
+        }
         
+        all_results = []
         for turn in range(self.num_turns):
-            # Get the current question
+            # Step 1: Get questions for this turn
             if turn == 0:
-                question = initial_question
+                questions = [conv['question'] for conv in conversations]
             else:
-                question = self._generate_student_question(messages)
+                # Generate student questions in batch
+                messages_list = [conv['messages'] for conv in conversations]
+                questions = self._generate_student_questions(messages_list)
             
-            # Add student question to history
-            messages.append({"role": "user", "content": question})
+            # Add questions to conversation histories
+            for conv, question in zip(conversations, questions):
+                conv['messages'].append({"role": "user", "content": question})
             
-            # Generate initial teacher response
-            initial_response = self._generate_teacher_response(messages)
+            # Step 2: Generate initial teacher responses in batch
+            messages_list = [conv['messages'] for conv in conversations]
+            initial_responses = self._generate_teacher_responses(messages_list)
             
-            # Apply CAI revision process
-            revision_data = self.cai_processor.revise_response(messages, initial_response)
-            revised_response = revision_data['revised_response']
+            # Step 3: Apply CAI revision process in batch
+            revision_results = self.cai_processor.revise_responses(messages_list, initial_responses)
             
-            # Add revised response to conversation history
-            messages.append({"role": "assistant", "content": revised_response})
-            
-            # Store this turn's data
-            results.append({
-                'conversation_id': id,
-                'question': question,
-                'messages': messages.copy(),
-                'category': category,
-                'initial_response': initial_response,
-                'critique_requests': revision_data['critique_requests'],
-                'critiques': revision_data['critiques'],
-                'revision_requests': revision_data['revision_requests'],
-                'revisions': revision_data['revisions'],
-                'chosen': revised_response,
-                'rejected': initial_response
-            })
+            # Step 4: Store results and update conversation histories
+            for i, conv in enumerate(conversations):
+                revised_response = revision_results[i]['revised_response']
+                
+                # Add revised response to conversation history
+                conv['messages'].append({"role": "assistant", "content": revised_response})
+                
+                # Store this turn's data
+                results['conversation_id'].append(conv['id'])
+                results['question'].append(questions[i])
+                results['messages'].append(conv['messages'].copy())
+                results['category'].append(conv['category'])
+                results['initial_response'].append(initial_responses[i])
+                results['critique_requests'].append(revision_results[i]['critique_requests'])
+                results['critiques'].append(revision_results[i]['critiques'])
+                results['revision_requests'].append(revision_results[i]['revision_requests'])
+                results['revisions'].append(revision_results[i]['revisions'])
+                results['chosen'].append(revised_response)
+                results['rejected'].append(initial_responses[i])
         
         return results
 
 
-def process_example(example, conversation_generator):
-    """Process a single example to generate a conversation"""
-    question = example.get('text', '')
-    category = example.get('category', 'general')
-    
-    return conversation_generator.generate_conversation(question, category)
-
-
 def process_batch(examples, conversation_generator):
     """Process a batch of examples"""
-    results = {
-        'conversation_id': [],
-        'question': [],
-        'messages': [],
-        'category': [],
-        'initial_response': [],
-        'critique_requests': [],
-        'critiques': [],
-        'revision_requests': [],
-        'revisions': [],
-        'chosen': [],
-        'rejected': []
-    }
+    questions_and_categories = [
+        (examples['text'][i], examples.get('label_text', ['general'] * len(examples['text']))[i])
+        for i in range(len(examples['text']))
+    ]
     
-    for i in range(len(examples['text'])):
-        example = {
-            'text': examples['text'][i],
-            'category': examples.get('label_text', ['general'] * len(examples['text']))[i]
-        }
-        
-        turn_results = process_example(example, conversation_generator)
-        
-        # Flatten results from all turns
-        for turn_result in turn_results:
-            for key in results.keys():
-                results[key].append(turn_result[key])
+    # Generate all conversations with batched LLM calls
+    return conversation_generator.generate_conversations(questions_and_categories)
     
-    return results
-
 
 def main():
     # Get arguments
