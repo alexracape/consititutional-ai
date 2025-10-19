@@ -9,7 +9,7 @@ from datasets import load_dataset, concatenate_datasets
 from constitution import Constitution
 
 
-MODEL = "meta-llama/Llama-3.2-1B-Instruct"
+MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 NUM_REVISIONS = 1
 NUM_TO_GENERATE = 2500
 NUM_TURNS = 1
