@@ -1,2 +1,5 @@
 /__pycache__
 .hf_token
+/sft_dataset_local
+/llama_finetuned
+/wandb
