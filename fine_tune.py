@@ -10,18 +10,18 @@ from datasets import load_dataset
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
-    TrainingArguments,
-    BitsAndBytesConfig,
 )
-from trl import SFTTrainer, DPOTrainer, DPOConfig
+from trl import SFTTrainer, SFTConfig, DPOTrainer, DPOConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+
+from testing import TeachingEvalCallback, TeachingEvaluator
 
 
 @dataclass
 class Config:
     """Single configuration class for all settings."""
     # Model
-    model_name: str = "meta-llama/Llama-3.1-8B-Instruct"
+    model_name: str = "meta-llama/Llama-3.2-1B-Instruct"
     
     # Dataset
     dataset_name: str = "aracape/cai-education-single-turn"
@@ -40,16 +40,15 @@ class Config:
     gradient_accumulation_steps: int = 4
     learning_rate: float = 1e-4
     warmup_ratio: float = 0.03
-    logging_steps: int = 10
-    save_steps: int = 100
-    eval_steps: int = 100
+    eval_steps: int = 500
+    save_steps: int = 500
     
     # DPO specific
     dpo_beta: float = 0.2
     
     # Logging
-    use_wandb: bool = False
-    wandb_project: str = "cai-finetuning"
+    use_wandb: bool = True
+    wandb_run: str = "default_run_name"
 
 
 def load_model_and_tokenizer(config: Config):
@@ -59,16 +58,10 @@ def load_model_and_tokenizer(config: Config):
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
     
-    # Model with 8-bit quantization
-    quantization_config = BitsAndBytesConfig(
-        load_in_8bit=True,
-    )
-    
     model = AutoModelForCausalLM.from_pretrained(
         config.model_name,
-        quantization_config=quantization_config,
         device_map="auto",
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
     )
     
     # Prepare for training
@@ -93,6 +86,15 @@ def load_model_and_tokenizer(config: Config):
 
 def prepare_datasets(config: Config, tokenizer, for_dpo: bool = False):
     """Load and prepare datasets."""
+
+    def format_for_sft(examples):
+        texts = []
+        for messages in examples["messages"]:
+            # Apply chat template to the conversation
+            text = tokenizer.apply_chat_template(messages, tokenize=False)
+            texts.append(text)
+        return {"text": texts}
+
     # Load dataset
     dataset = load_dataset(config.dataset_name, split="train")
     split_dataset = dataset.train_test_split(test_size=config.test_size, seed=42)
@@ -100,15 +102,7 @@ def prepare_datasets(config: Config, tokenizer, for_dpo: bool = False):
     eval_dataset = split_dataset["test"]
     
     if not for_dpo:
-        # For SFT: extract chosen responses from messages
-        def format_for_sft(examples):
-            texts = []
-            for messages in examples["messages"]:
-                # Apply chat template to the conversation
-                text = tokenizer.apply_chat_template(messages, tokenize=False)
-                texts.append(text)
-            return {"text": texts}
-        
+        # For SFT: extract chosen responses from messages TODO CHECK THIS: rn putting in all messages
         train_dataset = train_dataset.map(
             format_for_sft,
             batched=True,
@@ -134,9 +128,12 @@ def train_sft(config: Config):
     
     # Prepare datasets
     train_dataset, eval_dataset = prepare_datasets(config, tokenizer, for_dpo=False)
+
+    # Load custom evaluator
+    evaluator = TeachingEvaluator(judge_model_name=config.model_name)
     
     # Training arguments
-    training_args = TrainingArguments(
+    training_args = SFTConfig(
         output_dir=f"{config.output_dir}/sft",
         num_train_epochs=config.num_epochs,
         per_device_train_batch_size=config.batch_size,
@@ -144,16 +141,17 @@ def train_sft(config: Config):
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         learning_rate=config.learning_rate,
         warmup_ratio=config.warmup_ratio,
-        logging_steps=config.logging_steps,
-        save_steps=config.save_steps,
+        eval_strategy="steps",
+        save_strategy="steps",
         eval_steps=config.eval_steps,
-        eval_strategy="epoch",
-        save_strategy="epoch",
+        save_steps=config.save_steps,
         bf16=True,
-        optim="paged_adamw_8bit",
-        gradient_checkpointing=True,
         report_to="wandb" if config.use_wandb else "none",
+        run_name=config.wandb_run,
         load_best_model_at_end=True,
+        chat_template_path=config.model_name,
+        max_length=config.max_length,
+        auto_find_batch_size=True,
     )
     
     # Initialize trainer
@@ -162,10 +160,12 @@ def train_sft(config: Config):
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        tokenizer=tokenizer,
-        max_seq_length=config.max_length,
-        dataset_text_field="text",
+        callbacks=[
+            TeachingEvalCallback(evaluator, num_examples=5)
+        ]
     )
+
+    print(f"Trainer is using device: {trainer.args.device}")
     
     # Train
     trainer.train()
@@ -197,12 +197,10 @@ def train_dpo(config: Config, sft_model_path: Optional[str] = None):
     # Load model
     if sft_model_path:
         # Load from SFT checkpoint (already has LoRA)
-        quantization_config = BitsAndBytesConfig(load_in_8bit=True)
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
-            quantization_config=quantization_config,
             device_map="auto",
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
         )
     else:
         # Load base model and add LoRA
@@ -210,6 +208,9 @@ def train_dpo(config: Config, sft_model_path: Optional[str] = None):
     
     # Prepare datasets (DPO format - keeps prompt, chosen, rejected)
     train_dataset, eval_dataset = prepare_datasets(config, tokenizer, for_dpo=True)
+
+    # Load evaluator
+    evaluator = TeachingEvaluator(judge_model_name=config.model_name) 
     
     # DPO Configuration
     dpo_config = DPOConfig(
@@ -220,15 +221,13 @@ def train_dpo(config: Config, sft_model_path: Optional[str] = None):
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         learning_rate=config.learning_rate,
         warmup_ratio=config.warmup_ratio,
-        logging_steps=config.logging_steps,
-        save_steps=config.save_steps,
+        eval_strategy="steps",
+        save_strategy="steps",
         eval_steps=config.eval_steps,
-        eval_strategy="epoch",
-        save_strategy="epoch",
+        save_steps=config.save_steps,
         bf16=True,
-        optim="paged_adamw_8bit",
-        gradient_checkpointing=True,
         report_to="wandb" if config.use_wandb else "none",
+        run_name=config.wandb_run,
         beta=config.dpo_beta,
         max_length=config.max_length,
         max_prompt_length=config.max_length // 2,
@@ -238,12 +237,17 @@ def train_dpo(config: Config, sft_model_path: Optional[str] = None):
     # Initialize DPO trainer
     trainer = DPOTrainer(
         model=model,
+        processing_class=tokenizer,
         ref_model=None,  # Will create reference model automatically
         args=dpo_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        tokenizer=tokenizer,
+        callbacks=[
+            TeachingEvalCallback(evaluator, config.eval_steps, num_eval_examples=5)
+        ]
     )
+
+    print(f"Trainer is using device: {trainer.args.device}")
     
     # Train
     trainer.train()
@@ -288,7 +292,8 @@ if __name__ == "__main__":
         dataset_name="aracape/cai-education-single-turn",
         output_dir="./llama_finetuned",
         num_epochs=2,
-        use_wandb=False,
+        use_wandb=True,
+        wandb_run="testing_sft"
     )
     
     # Choose training approach:

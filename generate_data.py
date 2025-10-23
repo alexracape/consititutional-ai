@@ -55,22 +55,9 @@ class LLM:
             do_sample=True,
             dtype=torch.float16,
             temperature=self.temperature,
-            model_kwargs=model_kwargs
+            model_kwargs=model_kwargs,
         )
     
-    def generate(self, messages):
-        """Generate response from messages"""
-        try:
-            response = self.pipe(messages)
-            if isinstance(response, list) and len(response) > 0:
-                generated_text = response[0].get('generated_text', '')[-1]
-                assert generated_text.get("role") == "assistant"
-                return generated_text.get("content")
-            return ""
-        except Exception as e:
-            logger.error(f"Error generating response: {e}")
-            return ""
-
     def generate_batch(self, messages_list):
         try:
             responses = self.pipe(messages_list, batch_size=len(messages_list))
