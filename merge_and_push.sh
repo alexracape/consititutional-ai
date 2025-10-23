@@ -4,9 +4,9 @@
 # Runs the job to generate a dataset and push to HF
 #
 #SBATCH --account=edu
-#SBATCH --job-name=PushData
-#SBATCH -t 0-1:00                # Increase time limit (12 hours)
-#SBATCH --mem=16gb                # Total memory for the job (better than per-cpu)
+#SBATCH --job-name=CAIPushData
+#SBATCH -t 0-1:00   
+#SBATCH --mem=16gb
 
 module load anaconda
 
