@@ -261,11 +261,16 @@ class TeachingEvalCallback(TrainerCallback):
 		self.evaluator = evaluator
 		self.num_examples = num_examples
 		
-	def on_evaluate(self, args, state, control, model=None, tokenizer=None, **kwargs):
+	def on_evaluate(self, args, state, control, **kwargs):
 		"""Called at the end of eval"""
 		print(f"\n{'='*60}")
 		print(f"Running teaching quality evaluation at step {state.global_step}")
 		print(f"{'='*60}")
+
+		model = kwargs.get('model')
+		tokenizer = kwargs.get('tokenizer')
+		if not model or not tokenizer:
+			print("Issue loading model and tokenizer")
 		
 		model.eval()
 		metrics = self.evaluator.evaluate(model, tokenizer, self.num_examples)
@@ -273,7 +278,7 @@ class TeachingEvalCallback(TrainerCallback):
 		
 		# Log metrics
 		for key, value in metrics.items():
-				print(f"{key}: {value:.3f}")
+			print(f"{key}: {value:.3f}")
 		
 		# Log to wandb if available
 		try:
