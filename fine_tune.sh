@@ -22,8 +22,8 @@ export WANDB_API_KEY=$(cat ~/.wandb_token)
 export WANDB_PROJECT="cai-fine-tuning"
 
 # Activate environment
-conda activate caienv
 source /insomnia001/shared/apps/anaconda/2023.09/etc/profile.d/conda.sh
+conda activate caienv
 
 # Manually set PATH
 export PATH=/insomnia001/depts/edu/COMS-E6998-012/abr2184/envs/caienv/bin:$PATH

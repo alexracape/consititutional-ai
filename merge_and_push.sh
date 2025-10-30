@@ -15,8 +15,8 @@ export HF_HUB_ENABLE_HF_TRANSFER=1
 mkdir -p "$HF_HUB_CACHE"
 
 # Activate environment
-conda activate caienv
 source /insomnia001/shared/apps/anaconda/2023.09/etc/profile.d/conda.sh
+conda activate caienv
 
 # Manually fix PATH to prioritize conda env
 export PATH=/insomnia001/depts/edu/COMS-E6998-012/abr2184/envs/caienv/bin:$PATH

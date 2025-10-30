@@ -11,7 +11,16 @@ from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
 )
-from trl import SFTTrainer, SFTConfig, DPOTrainer, DPOConfig
+from trl import (
+    SFTTrainer, 
+    SFTConfig,
+    DPOTrainer,
+    DPOConfig, 
+    GRPOTrainer,
+    GRPOConfig,
+    RewardTrainer,
+    RewardConfig
+)
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 from testing import TeachingEvalCallback, TeachingEvaluator
@@ -261,6 +270,86 @@ def train_dpo(config: Config, sft_model_path: Optional[str] = None):
     return output_path
 
 
+def train_grpo(config: Config):
+    
+    # Load model and tokenizer
+    model, tokenizer = load_model_and_tokenizer(config)
+    
+    # Prepare datasets
+    train_dataset, eval_dataset = prepare_datasets(config, tokenizer, for_dpo=False)
+
+    # Load custom evaluator
+    evaluator = TeachingEvaluator(judge_model_name=config.model_name)
+    
+    # Training arguments
+    training_args = GRPOConfig(
+        output_dir=f"{config.output_dir}/grpo",
+        num_train_epochs=config.num_epochs,
+        per_device_train_batch_size=config.batch_size,
+        per_device_eval_batch_size=config.batch_size,
+        gradient_accumulation_steps=config.gradient_accumulation_steps,
+        learning_rate=config.learning_rate,
+        warmup_ratio=config.warmup_ratio,
+        eval_strategy="steps",
+        save_strategy="steps",
+        eval_steps=config.eval_steps,
+        save_steps=config.save_steps,
+        bf16=True,
+        report_to="wandb" if config.use_wandb else "none",
+        run_name=config.wandb_run,
+        load_best_model_at_end=True,
+        chat_template_path=config.model_name,
+        max_length=config.max_length,
+        auto_find_batch_size=True,
+    )
+    
+    # Initialize trainer
+    trainer = GRPOTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        callbacks=[
+            TeachingEvalCallback(evaluator, num_examples=5)
+        ]
+    )
+
+    print(f"Trainer is using device: {trainer.args.device}")
+    
+    # Train
+    trainer.train()
+    
+    # Save
+    output_path = f"{config.output_dir}/sft/final"
+    trainer.save_model(output_path)
+    tokenizer.save_pretrained(output_path)
+    
+    print(f"\n✓ GRPO completed! Model saved to: {output_path}")
+    return output_path
+
+
+def train_reward_model(config: Config):
+    reward_config = RewardConfig(
+        output_dir=f"{config.output_dir}/rm",
+        report_to="wandb" if config.use_wandb else "none",
+    )
+
+    trainer = RewardTrainer(
+        model="Qwen/Qwen3-0.6B",
+        args=reward_config,
+        train_dataset=load_dataset(config.dataset_name, split="train"),
+    )
+
+    trainer.train()
+
+    # Save
+    output_path = f"{config.output_dir}/sft/final"
+    trainer.save_model(output_path)
+    
+    print(f"\n✓ RM training completed! Model saved to: {output_path}")
+    return output_path
+
+
 def train_combined(config: Config):
     """Run combined SFT -> DPO training."""
     print("=" * 60)
@@ -295,8 +384,11 @@ if __name__ == "__main__":
         use_wandb=True,
         wandb_run="testing_sft"
     )
-    
-    # Choose training approach:
-    train_sft(config)
-    # train_dpo(config)
-    # train_combined(config)
+
+    if not torch.cuda.is_available() and not torch.mps.is_available():
+        print("No GPU available!")
+    else: 
+        # Choose training approach:
+        train_sft(config)
+        # train_dpo(config)
+        # train_combined(config)
