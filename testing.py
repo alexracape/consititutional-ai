@@ -1,10 +1,14 @@
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainerCallback
-from typing import List, Dict, Optional
 import re
-import numpy as np
+import logging
+from typing import List, Dict, Optional
 from dataclasses import dataclass
 
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM, TrainerCallback
+import numpy as np
+
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class EvalExample:
@@ -36,7 +40,7 @@ class TeachingEvaluator:
 			rubric: Custom rubric for evaluation (uses default if None)
 			batch_size: Batch size for generating responses (not for judging)
 		"""
-		print(f"Loading judge model: {judge_model_name}")
+		logger.info(f"Loading judge model: {judge_model_name}")
 		self.judge_tokenizer = AutoTokenizer.from_pretrained(judge_model_name)
 		self.judge_model = AutoModelForCausalLM.from_pretrained(
 			judge_model_name,
@@ -153,6 +157,7 @@ Evaluate this teaching response according to the rubric above. Provide detailed 
 			)
 		
 		judgment = self.judge_tokenizer.decode(outputs[0], skip_special_tokens=True)
+		logger.debug(judgment)
 		
 		# Extract score
 		score = self._extract_score(judgment)
@@ -175,7 +180,7 @@ Evaluate this teaching response according to the rubric above. Provide detailed 
 		if numbers:
 			return float(numbers[-1])  # Take last number found
 		
-		print(f"Warning: Could not extract score from judgment. Defaulting to 5.0")
+		logger.warning(f"Warning: Could not extract score from judgment. Defaulting to 5.0")
 		return 5.0
 	
 	def evaluate(
@@ -200,10 +205,10 @@ Evaluate this teaching response according to the rubric above. Provide detailed 
 		scores = []
 		category_scores = {}
 		
-		print(f"Evaluating on {len(examples)} examples...")
+		logger.info(f"Evaluating on {len(examples)} examples...")
 		
 		for i, example in enumerate(examples):
-			print(f"  Evaluating {i+1}/{len(examples)}: {example.prompt[:50]}...")
+			logger.info(f"  Evaluating {i+1}/{len(examples)}: {example.prompt[:50]}...")
 			
 			# Generate response from model being evaluated
 			response = self.generate_response(model, tokenizer, example.prompt)
@@ -219,7 +224,7 @@ Evaluate this teaching response according to the rubric above. Provide detailed 
 					category_scores[example.category] = []
 				category_scores[example.category].append(score)
 			
-			print(f"    Score: {score:.1f}/10")
+			logger.info(f"    Score: {score:.1f}/10")
 		
 		# Compute metrics
 		metrics = {
@@ -234,16 +239,6 @@ Evaluate this teaching response according to the rubric above. Provide detailed 
 			metrics[f"teaching_quality_{category}"] = np.mean(cat_scores)
 		
 		return metrics
-	
-	def compute_metrics_for_trainer(self, eval_pred=None):
-		"""
-		Compatible with HuggingFace Trainer's compute_metrics function.
-		Note: This is called during trainer.evaluate(), not with the model directly.
-		You'll need to use a custom callback for during-training evaluation.
-		"""
-		# This would be called by trainer.evaluate() but we need the actual model
-		# See TeachingEvalCallback below for the proper integration
-		pass
 
 
 class TeachingEvalCallback(TrainerCallback):
@@ -270,8 +265,8 @@ class TeachingEvalCallback(TrainerCallback):
 		model = kwargs.get('model')
 		tokenizer = kwargs.get('processing_class')
 		if not model or not tokenizer:
-			print("Issue loading model and tokenizer")
-			print(f"Kwargs: {kwargs}")
+			logger.warning("Issue loading model and tokenizer")
+			logger.debug(f"Kwargs: {kwargs}")
 			return control
 		
 		model.eval()
@@ -280,7 +275,7 @@ class TeachingEvalCallback(TrainerCallback):
 		
 		# Log metrics
 		for key, value in metrics.items():
-			print(f"{key}: {value:.3f}")
+			logger.info(f"{key}: {value:.3f}")
 		
 		# Log to wandb if available
 		try:

@@ -4,6 +4,7 @@ Supports preference datasets with 'messages' column format
 """
 
 import torch
+import logging
 from dataclasses import dataclass
 from typing import Optional
 from datasets import load_dataset
@@ -25,6 +26,14 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 from testing import TeachingEvalCallback, TeachingEvaluator
 
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Config:
@@ -174,7 +183,7 @@ def train_sft(config: Config):
         ]
     )
 
-    print(f"Trainer is using device: {trainer.args.device}")
+    logger.info(f"Trainer is using device: {trainer.args.device}")
     
     # Train
     trainer.train()
@@ -184,7 +193,7 @@ def train_sft(config: Config):
     trainer.save_model(output_path)
     tokenizer.save_pretrained(output_path)
     
-    print(f"\n✓ SFT completed! Model saved to: {output_path}")
+    logger.info(f"\n✓ SFT completed! Model saved to: {output_path}")
     return output_path
 
 
@@ -196,7 +205,7 @@ def train_dpo(config: Config, sft_model_path: Optional[str] = None):
     
     # Determine which model to start from
     model_path = sft_model_path if sft_model_path else config.model_name
-    print(f"Starting from: {model_path}")
+    logger.info(f"Starting from: {model_path}")
     
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
@@ -256,7 +265,7 @@ def train_dpo(config: Config, sft_model_path: Optional[str] = None):
         ]
     )
 
-    print(f"Trainer is using device: {trainer.args.device}")
+    logger.info(f"Trainer is using device: {trainer.args.device}")
     
     # Train
     trainer.train()
@@ -266,7 +275,7 @@ def train_dpo(config: Config, sft_model_path: Optional[str] = None):
     trainer.save_model(output_path)
     tokenizer.save_pretrained(output_path)
     
-    print(f"\n✓ DPO completed! Model saved to: {output_path}")
+    logger.info(f"\n✓ DPO completed! Model saved to: {output_path}")
     return output_path
 
 
@@ -314,7 +323,7 @@ def train_grpo(config: Config):
         ]
     )
 
-    print(f"Trainer is using device: {trainer.args.device}")
+    logger.info(f"Trainer is using device: {trainer.args.device}")
     
     # Train
     trainer.train()
@@ -324,7 +333,7 @@ def train_grpo(config: Config):
     trainer.save_model(output_path)
     tokenizer.save_pretrained(output_path)
     
-    print(f"\n✓ GRPO completed! Model saved to: {output_path}")
+    logger.info(f"\n✓ GRPO completed! Model saved to: {output_path}")
     return output_path
 
 
@@ -346,7 +355,7 @@ def train_reward_model(config: Config):
     output_path = f"{config.output_dir}/sft/final"
     trainer.save_model(output_path)
     
-    print(f"\n✓ RM training completed! Model saved to: {output_path}")
+    logger.info(f"\n✓ RM training completed! Model saved to: {output_path}")
     return output_path
 
 
@@ -357,11 +366,11 @@ def train_combined(config: Config):
     print("=" * 60)
     
     # Phase 1: SFT
-    print("\n[Phase 1/2] Supervised Fine-Tuning")
+    logger.info("[Phase 1/2] Supervised Fine-Tuning")
     sft_model_path = train_sft(config)
     
     # Phase 2: DPO on top of SFT model
-    print("\n[Phase 2/2] Direct Preference Optimization")
+    logger.info("[Phase 2/2] Direct Preference Optimization")
     final_model_path = train_dpo(config, sft_model_path=sft_model_path)
     
     print("\n" + "=" * 60)
@@ -380,13 +389,14 @@ if __name__ == "__main__":
         model_name="meta-llama/Llama-3.2-1B-Instruct",
         dataset_name="aracape/cai-education-single-turn",
         output_dir="./llama_finetuned",
-        num_epochs=2,
+        num_epochs=3,
+        eval_steps=200,
         use_wandb=True,
         wandb_run="testing_sft"
     )
 
     if not torch.cuda.is_available() and not torch.mps.is_available():
-        print("No GPU available!")
+        logger.warning("No GPU available!")
     else: 
         # Choose training approach:
         train_sft(config)
