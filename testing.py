@@ -268,9 +268,11 @@ class TeachingEvalCallback(TrainerCallback):
 		print(f"{'='*60}")
 
 		model = kwargs.get('model')
-		tokenizer = kwargs.get('tokenizer')
+		tokenizer = kwargs.get('processing_class')
 		if not model or not tokenizer:
 			print("Issue loading model and tokenizer")
+			print(f"Kwargs: {kwargs}")
+			return control
 		
 		model.eval()
 		metrics = self.evaluator.evaluate(model, tokenizer, self.num_examples)
