@@ -8,16 +8,18 @@
 #SBATCH -t 0-1:00   
 #SBATCH --mem=16gb
 
-module load anaconda
-
 export HF_TOKEN=$(cat ~/.hf_token)
 export HF_HOME="/insomnia001/depts/edu/COMS-E6998-012/abr2184/hf"
 export HF_HUB_CACHE="$HF_HOME/hub"
 export HF_HUB_ENABLE_HF_TRANSFER=1
 mkdir -p "$HF_HUB_CACHE"
 
-source /insomnia001/shared/apps/anaconda/2023.09/etc/profile.d/conda.sh
+# Activate environment
 conda activate caienv
+source /insomnia001/shared/apps/anaconda/2023.09/etc/profile.d/conda.sh
+
+# Manually fix PATH to prioritize conda env
+export PATH=/insomnia001/depts/edu/COMS-E6998-012/abr2184/envs/caienv/bin:$PATH
 
 python merge_and_push.py
 

@@ -1,14 +1,13 @@
-#!/bin/sh
+#!/bin/bash
 #
 # Based on the simple "Hello World" submit script for Slurm.
 # Runs the job to generate a dataset and push to HF
 #
 #SBATCH --account=edu
 #SBATCH --job-name=CAIFineTuning
-#SBATCH -c 2                      # Increase CPU cores for better performance
-#SBATCH -t 0-12:00                # Increase time limit (12 hours)
-#SBATCH --mem=32gb                # Total memory for the job (better than per-cpu)
-#SBATCH --gres=gpu:1              # Specify 1 GPU explicitly
+#SBATCH -t 0-12:00
+#SBATCH --mem=32gb
+#SBATCH --gres=gpu:1
 
 
 module load anaconda
@@ -22,10 +21,26 @@ mkdir -p "$HF_HUB_CACHE"
 export WANDB_API_KEY=$(cat ~/.wandb_token)
 export WANDB_PROJECT="cai-fine-tuning"
 
-source /insomnia001/shared/apps/anaconda/2023.09/etc/profile.d/conda.sh
+# Activate environment
 conda activate caienv
+source /insomnia001/shared/apps/anaconda/2023.09/etc/profile.d/conda.sh
 
-nvidia-smi
+# Manually set PATH
+export PATH=/insomnia001/depts/edu/COMS-E6998-012/abr2184/envs/caienv/bin:$PATH
+
+# Python debugging info
+echo "Python location: $(which python)"
+echo "Conda environment: $CONDA_DEFAULT_ENV"
+
+debug="$HOME/job_history.txt"
+touch $debug
+echo "------------------------------" >> $debug
+date >> $debug
+echo $SLURM_JOB_ID >> $debug
+echo $HOSTNAME >> $debug
+echo "Cuda visible devices output is $CUDA_VISIBLE_DEVICES" >> $debug
+echo "Here is nvidi-smi:" >> $debug
+nvidia-smi >> $debug
 
 python fine_tune.py
 
