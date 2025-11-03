@@ -5,8 +5,8 @@ Supports preference datasets with 'messages' column format
 
 import torch
 import logging
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Any
 from datasets import load_dataset
 from transformers import (
     AutoTokenizer,
@@ -67,6 +67,48 @@ class Config:
     # Logging
     use_wandb: bool = True
     wandb_run: str = "default_run_name"
+    
+    # HuggingFace Hub
+    push_to_hub: bool = False
+    hub_model_id: Optional[str] = None
+    hub_strategy: str = "end"
+    
+    def get_base_training_args(self, output_subdir: str, **kwargs) -> Dict[str, Any]:
+        """Get common training arguments for all training types."""
+        base_args = {
+            "output_dir": f"{self.output_dir}/{output_subdir}",
+            "num_train_epochs": self.num_epochs,
+            "per_device_train_batch_size": self.batch_size,
+            "per_device_eval_batch_size": self.batch_size,
+            "gradient_accumulation_steps": self.gradient_accumulation_steps,
+            "learning_rate": self.learning_rate,
+            "warmup_ratio": self.warmup_ratio,
+            "eval_strategy": "steps",
+            "save_strategy": "steps",
+            "eval_steps": self.eval_steps,
+            "save_steps": self.save_steps,
+            "bf16": True,
+            "report_to": "wandb" if self.use_wandb else "none",
+            "run_name": self.wandb_run,
+            "load_best_model_at_end": True,
+            "max_length": self.max_length,
+            "auto_find_batch_size": True,
+        }
+        
+        # Add Hub configuration if enabled
+        if self.push_to_hub:
+            if not self.hub_model_id:
+                raise ValueError("hub_model_id must be set when push_to_hub=True")
+            
+            base_args.update({
+                "push_to_hub": True,
+                "hub_model_id": self.hub_model_id,
+                "hub_strategy": self.hub_strategy,
+            })
+        
+        # Override with any custom kwargs
+        base_args.update(kwargs)
+        return base_args
 
 
 def load_model_and_tokenizer(config: Config):
@@ -120,7 +162,7 @@ def prepare_datasets(config: Config, tokenizer, for_dpo: bool = False):
     eval_dataset = split_dataset["test"]
     
     if not for_dpo:
-        # For SFT: extract chosen responses from messages TODO CHECK THIS: rn putting in all messages
+        # For SFT: extract chosen responses from messages
         train_dataset = train_dataset.map(
             format_for_sft,
             batched=True,
@@ -150,26 +192,12 @@ def train_sft(config: Config):
     # Load custom evaluator
     evaluator = TeachingEvaluator(judge_model_name=config.model_name)
     
-    # Training arguments
+    # Get base training args and add SFT-specific settings
     training_args = SFTConfig(
-        output_dir=f"{config.output_dir}/sft",
-        num_train_epochs=config.num_epochs,
-        per_device_train_batch_size=config.batch_size,
-        per_device_eval_batch_size=config.batch_size,
-        gradient_accumulation_steps=config.gradient_accumulation_steps,
-        learning_rate=config.learning_rate,
-        warmup_ratio=config.warmup_ratio,
-        eval_strategy="steps",
-        save_strategy="steps",
-        eval_steps=config.eval_steps,
-        save_steps=config.save_steps,
-        bf16=True,
-        report_to="wandb" if config.use_wandb else "none",
-        run_name=config.wandb_run,
-        load_best_model_at_end=True,
-        chat_template_path=config.model_name,
-        max_length=config.max_length,
-        auto_find_batch_size=True,
+        **config.get_base_training_args(
+            output_subdir="sft",
+            chat_template_path=config.model_name,
+        )
     )
     
     # Initialize trainer
@@ -188,12 +216,15 @@ def train_sft(config: Config):
     # Train
     trainer.train()
     
-    # Save
+    # Save locally
     output_path = f"{config.output_dir}/sft/final"
     trainer.save_model(output_path)
     tokenizer.save_pretrained(output_path)
     
     logger.info(f"\n✓ SFT completed! Model saved to: {output_path}")
+    if config.push_to_hub:
+        logger.info(f"✓ Model uploaded to HF Hub: {config.hub_model_id}")
+    
     return output_path
 
 
@@ -230,26 +261,13 @@ def train_dpo(config: Config, sft_model_path: Optional[str] = None):
     # Load evaluator
     evaluator = TeachingEvaluator(judge_model_name=config.model_name) 
     
-    # DPO Configuration
+    # Get base training args and add DPO-specific settings
     dpo_config = DPOConfig(
-        output_dir=f"{config.output_dir}/dpo",
-        num_train_epochs=config.num_epochs,
-        per_device_train_batch_size=config.batch_size,
-        per_device_eval_batch_size=config.batch_size,
-        gradient_accumulation_steps=config.gradient_accumulation_steps,
-        learning_rate=config.learning_rate,
-        warmup_ratio=config.warmup_ratio,
-        eval_strategy="steps",
-        save_strategy="steps",
-        eval_steps=config.eval_steps,
-        save_steps=config.save_steps,
-        bf16=True,
-        report_to="wandb" if config.use_wandb else "none",
-        run_name=config.wandb_run,
-        beta=config.dpo_beta,
-        max_length=config.max_length,
-        max_prompt_length=config.max_length // 2,
-        load_best_model_at_end=True,
+        **config.get_base_training_args(
+            output_subdir="dpo",
+            beta=config.dpo_beta,
+            max_prompt_length=config.max_length // 2,
+        )
     )
     
     # Initialize DPO trainer
@@ -270,16 +288,23 @@ def train_dpo(config: Config, sft_model_path: Optional[str] = None):
     # Train
     trainer.train()
     
-    # Save
+    # Save locally
     output_path = f"{config.output_dir}/dpo/final"
     trainer.save_model(output_path)
     tokenizer.save_pretrained(output_path)
     
     logger.info(f"\n✓ DPO completed! Model saved to: {output_path}")
+    if config.push_to_hub:
+        logger.info(f"✓ Model uploaded to HF Hub: {config.hub_model_id}")
+    
     return output_path
 
 
 def train_grpo(config: Config):
+    """Run Group Relative Policy Optimization."""
+    print("=" * 60)
+    print("Starting Group Relative Policy Optimization (GRPO)")
+    print("=" * 60)
     
     # Load model and tokenizer
     model, tokenizer = load_model_and_tokenizer(config)
@@ -290,26 +315,12 @@ def train_grpo(config: Config):
     # Load custom evaluator
     evaluator = TeachingEvaluator(judge_model_name=config.model_name)
     
-    # Training arguments
+    # Get base training args and add GRPO-specific settings
     training_args = GRPOConfig(
-        output_dir=f"{config.output_dir}/grpo",
-        num_train_epochs=config.num_epochs,
-        per_device_train_batch_size=config.batch_size,
-        per_device_eval_batch_size=config.batch_size,
-        gradient_accumulation_steps=config.gradient_accumulation_steps,
-        learning_rate=config.learning_rate,
-        warmup_ratio=config.warmup_ratio,
-        eval_strategy="steps",
-        save_strategy="steps",
-        eval_steps=config.eval_steps,
-        save_steps=config.save_steps,
-        bf16=True,
-        report_to="wandb" if config.use_wandb else "none",
-        run_name=config.wandb_run,
-        load_best_model_at_end=True,
-        chat_template_path=config.model_name,
-        max_length=config.max_length,
-        auto_find_batch_size=True,
+        **config.get_base_training_args(
+            output_subdir="grpo",
+            chat_template_path=config.model_name,
+        )
     )
     
     # Initialize trainer
@@ -328,34 +339,50 @@ def train_grpo(config: Config):
     # Train
     trainer.train()
     
-    # Save
-    output_path = f"{config.output_dir}/sft/final"
+    # Save locally
+    output_path = f"{config.output_dir}/grpo/final"
     trainer.save_model(output_path)
     tokenizer.save_pretrained(output_path)
     
     logger.info(f"\n✓ GRPO completed! Model saved to: {output_path}")
+    if config.push_to_hub:
+        logger.info(f"✓ Model uploaded to HF Hub: {config.hub_model_id}")
+    
     return output_path
 
 
 def train_reward_model(config: Config):
+    """Train a reward model."""
+    print("=" * 60)
+    print("Starting Reward Model Training")
+    print("=" * 60)
+    
+    # Get base training args for reward model
     reward_config = RewardConfig(
-        output_dir=f"{config.output_dir}/rm",
-        report_to="wandb" if config.use_wandb else "none",
+        **config.get_base_training_args(
+            output_subdir="rm",
+        )
     )
 
     trainer = RewardTrainer(
         model="Qwen/Qwen3-0.6B",
         args=reward_config,
         train_dataset=load_dataset(config.dataset_name, split="train"),
+        push_to_hub=True,
+        hub_model_id="la-rm-0.6B",
+        hub_strategy="end"
     )
 
     trainer.train()
 
-    # Save
-    output_path = f"{config.output_dir}/sft/final"
+    # Save locally
+    output_path = f"{config.output_dir}/rm/final"
     trainer.save_model(output_path)
     
     logger.info(f"\n✓ RM training completed! Model saved to: {output_path}")
+    if config.push_to_hub:
+        logger.info(f"✓ Model uploaded to HF Hub: {config.hub_model_id}")
+    
     return output_path
 
 
@@ -385,20 +412,24 @@ def train_combined(config: Config):
 if __name__ == "__main__":
     # Initialize configuration
     config = Config(
-        # model_name="meta-llama/Llama-3.1-8B-Instruct",
         model_name="meta-llama/Llama-3.2-1B-Instruct",
         dataset_name="aracape/cai-education-single-turn",
         output_dir="./llama_finetuned",
         num_epochs=3,
         eval_steps=200,
+        # WandB settings
         use_wandb=True,
-        wandb_run="testing_sft"
+        wandb_run="testing_sft",
+        # HuggingFace Hub settings
+        push_to_hub=True,
+        hub_model_id="aracape/la-1B-SFT",
+        hub_strategy="end",  # Only push final model
     )
 
     if not torch.cuda.is_available() and not torch.mps.is_available():
         logger.warning("No GPU available!")
     else: 
         # Choose training approach:
-        train_sft(config)
-        # train_dpo(config)
+        # train_sft(config)
+        train_dpo(config)
         # train_combined(config)
