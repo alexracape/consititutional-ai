@@ -417,6 +417,7 @@ if __name__ == "__main__":
         output_dir="./llama_finetuned",
         num_epochs=3,
         eval_steps=200,
+        save_steps=600, # Must be a multiple
         # WandB settings
         use_wandb=True,
         wandb_run="testing_sft",
