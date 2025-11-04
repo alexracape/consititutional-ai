@@ -10,6 +10,7 @@
 #SBATCH --mem=64gb                # Total memory for the job (better than per-cpu)
 #SBATCH --gres=gpu:1              # Specify 1 GPU explicitly
 #SBATCH --array=0-1               # Start with 2 jobs 
+#SBATCH --exclude=ins082
 
 
 module load anaconda
