@@ -368,12 +368,6 @@ def train_reward_model(config: Config):
         model="Qwen/Qwen3-0.6B",
         args=reward_config,
         train_dataset=load_dataset(config.dataset_name, split="train"),
-        push_to_hub=True,
-        hub_model_id="la-rm-0.6B",
-        hub_strategy="end",
-        report_to="wandb",
-        run_name=config.wandb_run,
-        load_best_model_at_end=True
     )
 
     trainer.train()
@@ -438,7 +432,7 @@ if __name__ == "__main__":
         save_steps=600, # Must be a multiple
         # WandB settings
         use_wandb=True,
-        wandb_run="testing_sft",
+        wandb_run="testing_rm",
         # HuggingFace Hub settings
         push_to_hub=True,
         hub_model_id="aracape/la-rm-0.6B",
