@@ -370,7 +370,10 @@ def train_reward_model(config: Config):
         train_dataset=load_dataset(config.dataset_name, split="train"),
         push_to_hub=True,
         hub_model_id="la-rm-0.6B",
-        hub_strategy="end"
+        hub_strategy="end",
+        report_to="wandb",
+        run_name=config.wandb_run,
+        load_best_model_at_end=True
     )
 
     trainer.train()
@@ -411,11 +414,26 @@ def train_combined(config: Config):
 
 if __name__ == "__main__":
     # Initialize configuration
+    # config = Config(
+    #     model_name="meta-llama/Llama-3.2-1B-Instruct",
+    #     dataset_name="aracape/cai-education-single-turn",
+    #     output_dir="./llama_finetuned",
+    #     num_epochs=3,
+    #     eval_steps=200,
+    #     save_steps=600, # Must be a multiple
+    #     # WandB settings
+    #     use_wandb=True,
+    #     wandb_run="testing_sft",
+    #     # HuggingFace Hub settings
+    #     push_to_hub=True,
+    #     hub_model_id="aracape/la-1B-SFT",
+    #     hub_strategy="end",  # Only push final model
+    # )
     config = Config(
         model_name="meta-llama/Llama-3.2-1B-Instruct",
         dataset_name="aracape/cai-education-single-turn",
-        output_dir="./llama_finetuned",
-        num_epochs=3,
+        output_dir="./rm_finetuned",
+        num_epochs=5,
         eval_steps=200,
         save_steps=600, # Must be a multiple
         # WandB settings
@@ -423,7 +441,7 @@ if __name__ == "__main__":
         wandb_run="testing_sft",
         # HuggingFace Hub settings
         push_to_hub=True,
-        hub_model_id="aracape/la-1B-SFT",
+        hub_model_id="aracape/la-rm-0.6B",
         hub_strategy="end",  # Only push final model
     )
 
@@ -432,5 +450,6 @@ if __name__ == "__main__":
     else: 
         # Choose training approach:
         # train_sft(config)
-        train_dpo(config)
+        # train_dpo(config)
         # train_combined(config)
+        train_reward_model(config)
