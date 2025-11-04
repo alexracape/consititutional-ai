@@ -12,6 +12,7 @@
 #SBATCH --array=0-1               # Start with 2 jobs 
 #SBATCH --exclude=ins082
 
+
 module load anaconda
 
 export HF_TOKEN=$(cat ~/.hf_token)

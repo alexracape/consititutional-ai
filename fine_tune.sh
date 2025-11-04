@@ -10,6 +10,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --exclude=ins082
 
+
 module load anaconda
 
 export HF_TOKEN=$(cat ~/.hf_token)
