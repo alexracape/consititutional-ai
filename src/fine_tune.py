@@ -11,6 +11,7 @@ from datasets import load_dataset
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
+    BitsAndBytesConfig
 )
 from trl import (
     SFTTrainer, 
@@ -44,10 +45,16 @@ def load_model_and_tokenizer(config: Config):
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
     
+    # 8-bit quantization config
+    quant_cfg = BitsAndBytesConfig(
+        load_in_8bit=True,
+    )
+    
     model = AutoModelForCausalLM.from_pretrained(
         config.model_name,
         device_map="auto",
-        dtype=torch.bfloat16,
+        quantization_config=quant_cfg,
+        attn_implementation="flash_attention_2",
     )
     
     # Prepare for training
