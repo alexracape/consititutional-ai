@@ -29,9 +29,13 @@ conda activate caienv
 # Manually set PATH
 export PATH=/insomnia001/depts/edu/COMS-E6998-012/abr2184/envs/caienv/bin:$PATH
 
+# Get arguments
+METHOD=$1
+
 # Python debugging info
 echo "Python location: $(which python)"
 echo "Conda environment: $CONDA_DEFAULT_ENV"
+echo "Method: $METHOD"
 
 debug="$HOME/job_history.txt"
 touch $debug
@@ -43,6 +47,6 @@ echo "Cuda visible devices output is $CUDA_VISIBLE_DEVICES" >> $debug
 echo "Here is nvidi-smi:" >> $debug
 nvidia-smi >> $debug
 
-python src/fine_tune.py --method dpo
+python src/fine_tune.py --method $METHOD
 
 #End of script
