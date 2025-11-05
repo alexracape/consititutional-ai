@@ -172,6 +172,7 @@ def train_dpo(config: Config):
         **config.get_base_training_args(
             beta=config.dpo_beta,
             max_prompt_length=config.max_length // 2,
+            reference_freeze=True,
         )
     )
     
