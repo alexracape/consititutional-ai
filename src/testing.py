@@ -1,4 +1,3 @@
-import re
 import logging
 from typing import List, Dict, Optional
 from dataclasses import dataclass
@@ -7,56 +6,35 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainerCallback
 import numpy as np
 
+from judging import Judge, JudgeResult
+
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class EvalExample:
 	"""Single evaluation example with prompt and optional reference."""
+
 	prompt: str
 	reference_answer: Optional[str] = None
 	category: Optional[str] = None  # For tracking different question types
 
 
 class TeachingEvaluator:
-	"""
-	LLM-as-Judge evaluator for interactive teaching quality.
-	Compatible with HuggingFace Trainer API.
-	"""
-	
 	def __init__(
 		self,
-		judge_model_name: str = "meta-llama/Llama-3.2-3B-Instruct",
-		eval_examples: List[EvalExample] = None,
-		device: str = "cuda" if torch.cuda.is_available() else "cpu",
+		judge_backend: Judge,
+		eval_examples: Optional[List[EvalExample]] = None,
 		rubric: Optional[str] = None,
-		batch_size: int = 1,
 	):
-		"""
-		Args:
-			judge_model_name: HuggingFace model path for the judge
-			eval_examples: List of evaluation prompts to test on
-			device: Device to run judge model on
-			rubric: Custom rubric for evaluation (uses default if None)
-			batch_size: Batch size for generating responses (not for judging)
-		"""
-		logger.info(f"Loading judge model: {judge_model_name}")
-		self.judge_tokenizer = AutoTokenizer.from_pretrained(judge_model_name)
-		self.judge_model = AutoModelForCausalLM.from_pretrained(
-			judge_model_name,
-			dtype=torch.bfloat16,
-			device_map=device,
-		)
-		self.judge_model.eval()
-		
+		self.backend = judge_backend
 		self.eval_examples = eval_examples or self._default_examples()
-		self.device = device
-		self.batch_size = batch_size
 		self.rubric = rubric or self._default_rubric()
-		
+
 	def _default_rubric(self) -> str:
-		"""Default rubric for interactive teaching evaluation."""
-		return """You are evaluating a teaching assistant's response quality. Rate the response on a scale of 1-10 based on these criteria:
+		return """You are evaluating a teaching assistant's response quality. Rate the response on a scale of 1-10 based on these criteria.
+You can assume that this response is the start of a dialogue with the student.:
 
 SCORING RUBRIC:
 - Questions & Engagement (3 points): Does it ask thoughtful questions that guide learning? Avoids giving direct answers?
@@ -74,40 +52,16 @@ SCORING GUIDE:
 Provide your score as a single integer from 1-10 at the end of your evaluation in the format: SCORE: X"""
 
 	def _default_examples(self) -> List[EvalExample]:
-		"""Default evaluation examples for interactive teaching."""
 		return [
-			EvalExample(
-				prompt="I don't understand why seasons happen. Can you help me learn?",
-				category="conceptual"
-			),
-			EvalExample(
-				prompt="I'm stuck on this problem: If f(x) = 2x + 3, what is f(5)?",
-				category="math"
-			),
-			EvalExample(
-				prompt="What causes photosynthesis? I need to understand this for my test.",
-				category="science"
-			),
-			EvalExample(
-				prompt="Can you explain the difference between supervised and unsupervised learning?",
-				category="technical"
-			),
-			EvalExample(
-				prompt="I'm confused about why the French Revolution started.",
-				category="history"
-			),
+			EvalExample("I don't understand why seasons happen. Can you help me learn?", category="conceptual"),
+			EvalExample("I'm stuck: If f(x)=2x+3, what is f(5)?", category="math"),
+			EvalExample("What causes photosynthesis?", category="science"),
+			EvalExample("Explain supervised vs unsupervised learning.", category="technical"),
+			EvalExample("Why did the French Revolution start?", category="history"),
 		]
-	
-	def generate_response(
-		self,
-		model,
-		tokenizer,
-		prompt: str,
-		max_new_tokens: int = 256,
-	) -> str:
-		"""Generate response from the model being evaluated."""
+
+	def generate_response(self, model, tokenizer, prompt: str, max_new_tokens: int = 256) -> str:
 		inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-		
 		with torch.no_grad():
 			outputs = model.generate(
 				**inputs,
@@ -117,18 +71,12 @@ Provide your score as a single integer from 1-10 at the end of your evaluation i
 				top_p=0.9,
 				pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
 			)
-		
-		response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-		# Remove the prompt from response if it's included
-		if response.startswith(prompt):
-			response = response[len(prompt):].strip()
-		
-		return response
-	
+		text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+		return text[len(prompt) :].strip() if text.startswith(prompt) else text
+
 	def judge_response(self, prompt: str, response: str) -> Dict[str, float]:
-		"""Use judge model to score a response."""
-		
-		judge_prompt = f"""{self.rubric}
+		system = "You are a strict but fair teaching-quality judge. Follow the rubric exactly and end with 'SCORE: X'."
+		user = f"""{self.rubric}
 
 STUDENT QUESTION:
 {prompt}
@@ -137,108 +85,50 @@ TEACHING ASSISTANT RESPONSE:
 {response}
 
 Evaluate this teaching response according to the rubric above. Provide detailed reasoning, then end with your score in the format "SCORE: X" where X is 1-10."""
+		messages = [
+			{"role": "system", "content": system},
+			{"role": "user", "content": user},
+		]
+		res = self.backend.judge(messages)
+		return {"score": res.score, "judgment": res.judgment}
 
-		# Format for chat models
-		messages = [{"role": "user", "content": judge_prompt}]
-		judge_input = self.judge_tokenizer.apply_chat_template(
-			messages,
-			tokenize=False,
-			add_generation_prompt=True
-		)
-		
-		inputs = self.judge_tokenizer(judge_input, return_tensors="pt").to(self.device)
-		
-		with torch.no_grad():
-			outputs = self.judge_model.generate(
-				**inputs,
-				max_new_tokens=512,
-				do_sample=False,  # Deterministic for evaluation
-				pad_token_id=self.judge_tokenizer.pad_token_id or self.judge_tokenizer.eos_token_id,
-			)
-		
-		judgment = self.judge_tokenizer.decode(outputs[0], skip_special_tokens=True)
-		logger.debug(judgment)
-		
-		# Extract score
-		score = self._extract_score(judgment)
-		
-		return {
-			"score": score,
-			"judgment": judgment,
-		}
-	
-	def _extract_score(self, judgment: str) -> float:
-		"""Extract numerical score from judge's response."""
-		# Look for "SCORE: X" pattern
-		match = re.search(r'SCORE:\s*(\d+(?:\.\d+)?)', judgment, re.IGNORECASE)
-		if match:
-			score = float(match.group(1))
-			return max(1.0, min(10.0, score))  # Clamp between 1-10
-		
-		# Fallback: look for any number between 1-10
-		numbers = re.findall(r'\b([1-9]|10)\b', judgment)
-		if numbers:
-			return float(numbers[-1])  # Take last number found
-		
-		logger.warning(f"Warning: Could not extract score from judgment. Defaulting to 5.0")
-		return 5.0
-	
 	def evaluate(
-		self,
-		model,
-		tokenizer,
-		num_examples: Optional[int] = None,
+		self, model, tokenizer, num_examples: Optional[int] = None
 	) -> Dict[str, float]:
-		"""
-		Evaluate model on the eval examples.
-		
-		Args:
-			model: Model to evaluate
-			tokenizer: Tokenizer for the model
-			num_examples: Number of examples to evaluate (uses all if None)
-		
-		Returns:
-			Dictionary with evaluation metrics
-		"""
-		examples = self.eval_examples[:num_examples] if num_examples else self.eval_examples
-		
-		scores = []
-		category_scores = {}
-		
-		logger.info(f"Evaluating on {len(examples)} examples...")
-		
-		for i, example in enumerate(examples):
-			logger.info(f"  Evaluating {i+1}/{len(examples)}: {example.prompt[:50]}...")
-			
-			# Generate response from model being evaluated
-			response = self.generate_response(model, tokenizer, example.prompt)
-			
-			# Judge the response
-			result = self.judge_response(example.prompt, response)
-			score = result["score"]
-			scores.append(score)
-			
-			# Track by category
-			if example.category:
-				if example.category not in category_scores:
-					category_scores[example.category] = []
-				category_scores[example.category].append(score)
-			
-			logger.info(f"    Score: {score:.1f}/10")
-		
-		# Compute metrics
-		metrics = {
-			"teaching_quality_score": np.mean(scores),
-			"teaching_quality_std": np.std(scores),
-			"teaching_quality_min": np.min(scores),
-			"teaching_quality_max": np.max(scores),
+		examples = (
+			self.eval_examples[:num_examples] if num_examples else self.eval_examples
+		)
+		details = {
+			"prompts": [],
+			"responses": [],
+			"judgments": [],
+			"scores": [],
 		}
-		
-		# Add category-specific metrics
-		for category, cat_scores in category_scores.items():
-			metrics[f"teaching_quality_{category}"] = np.mean(cat_scores)
-		
-		return metrics
+		by_cat = [], {}
+		for ex in examples:
+			resp = self.generate_response(model, tokenizer, ex.prompt)
+			r = self.judge_response(ex.prompt, resp)
+			s = r["score"]
+			scores.append(s)
+			if ex.category:
+				by_cat.setdefault(ex.category, []).append(s)
+    
+			details["prompts"].append(ex.prompt)
+			details["responses"].append(resp)
+			details["judgments"].append(r["judgment"])
+			details["scores"].append(s)
+
+		scores = np.array(details["scores"])
+		metrics = {
+			"teaching_quality_score": float(np.mean(scores)),
+			"teaching_quality_std": float(np.std(scores)),
+			"teaching_quality_min": float(np.min(scores)),
+			"teaching_quality_max": float(np.max(scores)),
+		}
+		for cat, vals in by_cat.items():
+			metrics[f"teaching_quality_{cat}"] = float(np.mean(vals))
+   
+		return metrics, details
 
 
 class TeachingEvalCallback(TrainerCallback):
@@ -246,55 +136,57 @@ class TeachingEvalCallback(TrainerCallback):
 	Custom callback for HuggingFace Trainer to run LLM-as-judge evaluation.
 	Use this with Trainer(callbacks=[TeachingEvalCallback(evaluator)])
 	"""
-	
+
 	def __init__(self, evaluator: TeachingEvaluator, num_examples: int):
 		"""
 		Args:
-			evaluator: TeachingQualityEvaluator instance
-			eval_steps: Run evaluation every N training steps
+				evaluator: TeachingQualityEvaluator instance
+				eval_steps: Run evaluation every N training steps
 		"""
 		self.evaluator = evaluator
 		self.num_examples = num_examples
-		
+
 	def on_evaluate(self, args, state, control, **kwargs):
 		"""Called at the end of eval"""
 		print(f"\n{'='*60}")
 		print(f"Running teaching quality evaluation at step {state.global_step}")
 		print(f"{'='*60}")
 
-		model = kwargs.get('model')
-		tokenizer = kwargs.get('processing_class')
+		model = kwargs.get("model")
+		tokenizer = kwargs.get("processing_class")
 		if not model or not tokenizer:
 			logger.warning("Issue loading model and tokenizer")
 			logger.debug(f"Kwargs: {kwargs}")
 			return control
-		
+
 		model.eval()
-		metrics = self.evaluator.evaluate(model, tokenizer, self.num_examples)
+		metrics, judgement_details = self.evaluator.evaluate(model, tokenizer, self.num_examples)
 		model.train()
-		
+
 		# Log metrics
 		for key, value in metrics.items():
 			logger.info(f"{key}: {value:.3f}")
-		
+
 		# Log to wandb if available
 		try:
 			import wandb
+
 			if wandb.run is not None:
-				wandb.log({
-					**metrics,
-					"teaching_eval_step": state.global_step,
-				}, step=state.global_step)
+				wandb.log(
+					{
+						**metrics,
+						"teaching_eval_step": state.global_step,
+					},
+					step=state.global_step,
+				)
+				wandb.log(judgement_details, step=state.global_step)
 		except ImportError:
 			pass  # wandb not installed
-			
+
 		# Add to trainer logs for tracking
-		if hasattr(state, 'log_history'):
-			state.log_history.append({
-				'step': state.global_step,
-				**metrics
-			})
-				
+		if hasattr(state, "log_history"):
+			state.log_history.append({"step": state.global_step, **metrics})
+
 		print(f"{'='*60}\n")
 
 		return control
@@ -304,24 +196,21 @@ if __name__ == "__main__":
 
 	# Example test usage
 	from transformers import AutoModelForCausalLM, AutoTokenizer
-	
-	model_name = "meta-llama/Llama-3.2-1B-Instruct"  # Your model being fine-tuned
-	model = AutoModelForCausalLM.from_pretrained(model_name, dtype=torch.bfloat16, device_map="auto")
+	from judging import HFJudge
+
+	model_name = "meta-llama/Llama-3.2-1B-Instruct"
+	model = AutoModelForCausalLM.from_pretrained(
+		model_name, dtype=torch.bfloat16, device_map="auto"
+	)
 	tokenizer = AutoTokenizer.from_pretrained(model_name)
 	tokenizer.pad_token = tokenizer.eos_token
-	
+
 	# Create evaluator
-	evaluator = TeachingEvaluator(
-		judge_model_name="meta-llama/Llama-3.2-1B-Instruct",
-		eval_examples=[
-			EvalExample("I don't understand why the sky is blue. Can you help?", category="science"),
-			EvalExample("What's the derivative of x^2?", category="math"),
-		]
-	)
-	
+	judge = HFJudge(model="meta-llama/Meta-Llama-3-70B-Instruct")
+	evaluator = TeachingEvaluator(judge)
+
 	# Run evaluation
-	results = evaluator.evaluate(model, tokenizer)
+	results = evaluator.evaluate(model, tokenizer, num_examples=1)
 	print("\nEvaluation Results:")
 	for key, value in results.items():
 		print(f"{key}: {value:.3f}")
-	
