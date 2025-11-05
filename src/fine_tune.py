@@ -5,8 +5,8 @@ Supports preference datasets with 'messages' column format
 
 import torch
 import logging
-from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
+import argparse
 from datasets import load_dataset
 from transformers import (
     AutoTokenizer,
@@ -25,6 +25,7 @@ from trl import (
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 from testing import TeachingEvalCallback, TeachingEvaluator
+from config import Config, default_config
 
 
 logging.basicConfig(
@@ -34,81 +35,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-@dataclass
-class Config:
-    """Single configuration class for all settings."""
-    # Model
-    model_name: str = "meta-llama/Llama-3.2-1B-Instruct"
-    
-    # Dataset
-    dataset_name: str = "aracape/cai-education-single-turn"
-    test_size: float = 0.1
-    max_length: int = 512
-    
-    # LoRA
-    lora_r: int = 32
-    lora_alpha: int = 64
-    lora_dropout: float = 0.05
-    
-    # Training
-    output_dir: str = "./results"
-    num_epochs: int = 3
-    batch_size: int = 4
-    gradient_accumulation_steps: int = 4
-    learning_rate: float = 1e-4
-    warmup_ratio: float = 0.03
-    eval_steps: int = 500
-    save_steps: int = 500
-    
-    # DPO specific
-    dpo_beta: float = 0.2
-    
-    # Logging
-    use_wandb: bool = True
-    wandb_run: str = "default_run_name"
-    
-    # HuggingFace Hub
-    push_to_hub: bool = False
-    hub_model_id: Optional[str] = None
-    hub_strategy: str = "end"
-    
-    def get_base_training_args(self, output_subdir: str, **kwargs) -> Dict[str, Any]:
-        """Get common training arguments for all training types."""
-        base_args = {
-            "output_dir": f"{self.output_dir}/{output_subdir}",
-            "num_train_epochs": self.num_epochs,
-            "per_device_train_batch_size": self.batch_size,
-            "per_device_eval_batch_size": self.batch_size,
-            "gradient_accumulation_steps": self.gradient_accumulation_steps,
-            "learning_rate": self.learning_rate,
-            "warmup_ratio": self.warmup_ratio,
-            "eval_strategy": "steps",
-            "save_strategy": "steps",
-            "eval_steps": self.eval_steps,
-            "save_steps": self.save_steps,
-            "bf16": True,
-            "report_to": "wandb" if self.use_wandb else "none",
-            "run_name": self.wandb_run,
-            "load_best_model_at_end": True,
-            "max_length": self.max_length,
-            "auto_find_batch_size": True,
-        }
-        
-        # Add Hub configuration if enabled
-        if self.push_to_hub:
-            if not self.hub_model_id:
-                raise ValueError("hub_model_id must be set when push_to_hub=True")
-            
-            base_args.update({
-                "push_to_hub": True,
-                "hub_model_id": self.hub_model_id,
-                "hub_strategy": self.hub_strategy,
-            })
-        
-        # Override with any custom kwargs
-        base_args.update(kwargs)
-        return base_args
 
 
 def load_model_and_tokenizer(config: Config):
@@ -195,7 +121,6 @@ def train_sft(config: Config):
     # Get base training args and add SFT-specific settings
     training_args = SFTConfig(
         **config.get_base_training_args(
-            output_subdir="sft",
             chat_template_path=config.model_name,
         )
     )
@@ -264,7 +189,6 @@ def train_dpo(config: Config, sft_model_path: Optional[str] = None):
     # Get base training args and add DPO-specific settings
     dpo_config = DPOConfig(
         **config.get_base_training_args(
-            output_subdir="dpo",
             beta=config.dpo_beta,
             max_prompt_length=config.max_length // 2,
         )
@@ -279,7 +203,7 @@ def train_dpo(config: Config, sft_model_path: Optional[str] = None):
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         callbacks=[
-            TeachingEvalCallback(evaluator, config.eval_steps, num_eval_examples=5)
+            TeachingEvalCallback(evaluator, num_examples=5)
         ]
     )
 
@@ -317,10 +241,7 @@ def train_grpo(config: Config):
     
     # Get base training args and add GRPO-specific settings
     training_args = GRPOConfig(
-        **config.get_base_training_args(
-            output_subdir="grpo",
-            chat_template_path=config.model_name,
-        )
+        **config.get_base_training_args(chat_template_path=config.model_name)
     )
     
     # Initialize trainer
@@ -358,14 +279,10 @@ def train_reward_model(config: Config):
     print("=" * 60)
     
     # Get base training args for reward model
-    reward_config = RewardConfig(
-        **config.get_base_training_args(
-            output_subdir="rm",
-        )
-    )
+    reward_config = RewardConfig(**config.get_base_training_args())
 
     trainer = RewardTrainer(
-        model="Qwen/Qwen3-0.6B",
+        model=config.model_name,
         args=reward_config,
         train_dataset=load_dataset(config.dataset_name, split="train"),
     )
@@ -407,43 +324,31 @@ def train_combined(config: Config):
 
 
 if __name__ == "__main__":
-    # Initialize configuration
-    # config = Config(
-    #     model_name="meta-llama/Llama-3.2-1B-Instruct",
-    #     dataset_name="aracape/cai-education-single-turn",
-    #     output_dir="./llama_finetuned",
-    #     num_epochs=3,
-    #     eval_steps=200,
-    #     save_steps=600, # Must be a multiple
-    #     # WandB settings
-    #     use_wandb=True,
-    #     wandb_run="testing_sft",
-    #     # HuggingFace Hub settings
-    #     push_to_hub=True,
-    #     hub_model_id="aracape/la-1B-SFT",
-    #     hub_strategy="end",  # Only push final model
-    # )
-    config = Config(
-        model_name="meta-llama/Llama-3.2-1B-Instruct",
-        dataset_name="aracape/cai-education-single-turn",
-        output_dir="./rm_finetuned",
-        num_epochs=5,
-        eval_steps=200,
-        save_steps=600, # Must be a multiple
-        # WandB settings
-        use_wandb=True,
-        wandb_run="testing_rm",
-        # HuggingFace Hub settings
-        push_to_hub=True,
-        hub_model_id="aracape/la-rm-0.6B",
-        hub_strategy="end",  # Only push final model
-    )
 
     if not torch.cuda.is_available() and not torch.mps.is_available():
         logger.warning("No GPU available!")
-    else: 
-        # Choose training approach:
-        # train_sft(config)
-        # train_dpo(config)
-        # train_combined(config)
-        train_reward_model(config)
+        exit(1)
+
+    # Get args
+    parser = argparse.ArgumentParser(description="Fine-tuning script for SFT, DPO, and GRPO.")
+    parser.add_argument(
+        "--method",
+        type=str,
+        choices=["sft", "dpo", "rm", "grpo"],
+        required=True,
+        help="Fine-tuning method to use: 'sft', 'dpo', 'rm', or 'grpo'."
+    )
+    args = parser.parse_args()
+    method = args.method.lower()
+    config = default_config(method)
+    
+    match method:
+        case "sft":
+            train_sft(config)
+        case "dpo":
+            train_dpo(config)
+        case "rm":
+            train_reward_model(config)
+        case "grpo":
+            train_grpo(config)
+    

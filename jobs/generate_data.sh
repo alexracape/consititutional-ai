@@ -28,6 +28,6 @@ nvidia-smi
 
 echo "Running task $SLURM_ARRAY_TASK_ID on GPU $CUDA_VISIBLE_DEVICES"
 
-python generate_data.py --job_id $SLURM_ARRAY_TASK_ID --num_jobs $SLURM_ARRAY_TASK_COUNT
+python src/generate_data.py --job_id $SLURM_ARRAY_TASK_ID --num_jobs $SLURM_ARRAY_TASK_COUNT
 
 #End of script

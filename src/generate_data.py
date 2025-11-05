@@ -4,8 +4,8 @@ import time
 import argparse
 
 import torch
-from transformers import pipeline, AutoTokenizer, BitsAndBytesConfig
-from datasets import load_dataset, concatenate_datasets
+from transformers import pipeline, AutoTokenizer
+from datasets import load_dataset
 from constitution import Constitution
 
 

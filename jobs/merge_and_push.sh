@@ -21,6 +21,6 @@ conda activate caienv
 # Manually fix PATH to prioritize conda env
 export PATH=/insomnia001/depts/edu/COMS-E6998-012/abr2184/envs/caienv/bin:$PATH
 
-python merge_and_push.py
+python src/merge_and_push.py
 
 #End of script

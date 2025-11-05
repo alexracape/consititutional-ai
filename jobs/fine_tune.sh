@@ -43,6 +43,6 @@ echo "Cuda visible devices output is $CUDA_VISIBLE_DEVICES" >> $debug
 echo "Here is nvidi-smi:" >> $debug
 nvidia-smi >> $debug
 
-python fine_tune.py
+python src/fine_tune.py --method dpo
 
 #End of script

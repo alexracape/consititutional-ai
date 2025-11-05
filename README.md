@@ -7,14 +7,16 @@ Looking to implement and learn more about CAI with a focus on education
 1. Fine-tune an open source model to behave more like a TA
 2. Quantify improvement against some benchmark (possibly MT Bench)
 
-## Commands to remember
 
-- Run the job: `sbatch -A edu job.sh`
-- Copy to HPC: `scp job.sh  abr2184@insomnia.rcs.columbia.edu:/insomnia001/depts/edu/COMS-E6998-012/UNI`
-- Switch to compute node: ``
+## Usage
 
-## TODO:
+To run a job on the HPC cluster, use the provided job scripts in the `jobs/` directory. You can submit jobs using `sbatch` and monitor them with `squeue`.
 
-- Readjust the output of the dataset so we can see the critique that is being made
-- Maybe limit to one critique and revision for now
-- Look into how to get more engagement and helpfulness
+For example, to generate data, you can use the `generate_data.sh` script:
+
+```bash
+sbatch jobs/generate_data.sh
+```
+
+> [!NOTE] Make sure to submit the job from the root directory of the project to ensure correct paths.
+
