@@ -70,7 +70,7 @@ def load_model_and_tokenizer(config: Config):
     return model, tokenizer
 
 
-def prepare_datasets(config: Config, tokenizer, for_dpo: bool = False):
+def prepare_datasets(config: Config, tokenizer, for_sft: bool = False):
     """Load and prepare datasets."""
 
     def format_for_sft(examples):
@@ -87,8 +87,7 @@ def prepare_datasets(config: Config, tokenizer, for_dpo: bool = False):
     train_dataset = split_dataset["train"]
     eval_dataset = split_dataset["test"]
     
-    if not for_dpo:
-        # For SFT: extract chosen responses from messages
+    if for_sft:
         train_dataset = train_dataset.map(
             format_for_sft,
             batched=True,
@@ -113,7 +112,7 @@ def train_sft(config: Config):
     model, tokenizer = load_model_and_tokenizer(config)
     
     # Prepare datasets
-    train_dataset, eval_dataset = prepare_datasets(config, tokenizer, for_dpo=False)
+    train_dataset, eval_dataset = prepare_datasets(config, tokenizer, for_sft=True)
 
     # Load custom evaluator
     evaluator = TeachingEvaluator(judge_model_name=config.model_name)
@@ -163,7 +162,7 @@ def train_dpo(config: Config):
     model, tokenizer = load_model_and_tokenizer(config)
     
     # Prepare datasets (DPO format - keeps prompt, chosen, rejected)
-    train_dataset, eval_dataset = prepare_datasets(config, tokenizer, for_dpo=True)
+    train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
 
     # Load evaluator
     evaluator = TeachingEvaluator(judge_model_name=config.model_name) 
@@ -216,7 +215,7 @@ def train_grpo(config: Config):
     model, tokenizer = load_model_and_tokenizer(config)
     
     # Prepare datasets
-    train_dataset, eval_dataset = prepare_datasets(config, tokenizer, for_dpo=False)
+    train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
 
     # Load custom evaluator
     evaluator = TeachingEvaluator(judge_model_name=config.model_name)
@@ -260,13 +259,20 @@ def train_reward_model(config: Config):
     print("Starting Reward Model Training")
     print("=" * 60)
     
+    # Load model and tokenizer
+    model, tokenizer = load_model_and_tokenizer(config)
+    
+    # Prepare datasets
+    train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
+    
     # Get base training args for reward model
     reward_config = RewardConfig(**config.get_base_training_args())
 
     trainer = RewardTrainer(
-        model=config.model_name,
+        model=model,
         args=reward_config,
-        train_dataset=load_dataset(config.dataset_name, split="train"),
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
     )
 
     trainer.train()
