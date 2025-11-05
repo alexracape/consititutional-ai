@@ -153,32 +153,14 @@ def train_sft(config: Config):
     return output_path
 
 
-def train_dpo(config: Config, sft_model_path: Optional[str] = None):
+def train_dpo(config: Config):
     """Run Direct Preference Optimization."""
     print("=" * 60)
     print("Starting Direct Preference Optimization (DPO)")
     print("=" * 60)
     
-    # Determine which model to start from
-    model_path = sft_model_path if sft_model_path else config.model_name
-    logger.info(f"Starting from: {model_path}")
-    
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "right"
-    
-    # Load model
-    if sft_model_path:
-        # Load from SFT checkpoint (already has LoRA)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            device_map="auto",
-            dtype=torch.bfloat16,
-        )
-    else:
-        # Load base model and add LoRA
-        model, tokenizer = load_model_and_tokenizer(config)
+    # Load base model and add LoRA
+    model, tokenizer = load_model_and_tokenizer(config)
     
     # Prepare datasets (DPO format - keeps prompt, chosen, rejected)
     train_dataset, eval_dataset = prepare_datasets(config, tokenizer, for_dpo=True)
