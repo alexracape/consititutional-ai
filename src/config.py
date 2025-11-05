@@ -24,8 +24,11 @@ class Config:
     gradient_accumulation_steps: int = 4
     learning_rate: float = 1e-4
     warmup_ratio: float = 0.03
+
+    # Evaluation and saving
     eval_steps: int = 200
     save_steps: int = 600
+    judge_model: str = "meta-llama/Meta-Llama-3-70B-Instruct"
     
     # DPO specific
     dpo_beta: float = 0.2

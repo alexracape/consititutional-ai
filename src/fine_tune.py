@@ -25,6 +25,7 @@ from trl import (
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 from testing import TeachingEvalCallback, TeachingEvaluator
+from judging import HFJudge
 from config import Config, default_config
 
 
@@ -115,7 +116,8 @@ def train_sft(config: Config):
     train_dataset, eval_dataset = prepare_datasets(config, tokenizer, for_sft=True)
 
     # Load custom evaluator
-    evaluator = TeachingEvaluator(judge_model_name=config.model_name)
+    judge = HFJudge(model=config.judge_model)
+    evaluator = TeachingEvaluator(judge)
     
     # Get base training args and add SFT-specific settings
     training_args = SFTConfig(
@@ -165,7 +167,8 @@ def train_dpo(config: Config):
     train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
 
     # Load evaluator
-    evaluator = TeachingEvaluator(judge_model_name=config.model_name) 
+    judge = HFJudge(model=config.judge_model)
+    evaluator = TeachingEvaluator(judge) 
     
     # Get base training args and add DPO-specific settings
     dpo_config = DPOConfig(
@@ -219,7 +222,8 @@ def train_grpo(config: Config):
     train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
 
     # Load custom evaluator
-    evaluator = TeachingEvaluator(judge_model_name=config.model_name)
+    judge = HFJudge(model=config.judge_model)
+    evaluator = TeachingEvaluator(judge)
     
     # Get base training args and add GRPO-specific settings
     training_args = GRPOConfig(
