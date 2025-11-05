@@ -33,7 +33,8 @@ class TeachingEvaluator:
 		self.rubric = rubric or self._default_rubric()
 
 	def _default_rubric(self) -> str:
-		return """You are evaluating a teaching assistant's response quality. Rate the response on a scale of 1-10 based on these criteria:
+		return """You are evaluating a teaching assistant's response quality. Rate the response on a scale of 1-10 based on these criteria.
+You can assume that this response is the start of a dialogue with the student.:
 
 SCORING RUBRIC:
 - Questions & Engagement (3 points): Does it ask thoughtful questions that guide learning? Avoids giving direct answers?
@@ -97,7 +98,13 @@ Evaluate this teaching response according to the rubric above. Provide detailed 
 		examples = (
 			self.eval_examples[:num_examples] if num_examples else self.eval_examples
 		)
-		scores, by_cat = [], {}
+		details = {
+			"prompts": [],
+			"responses": [],
+			"judgments": [],
+			"scores": [],
+		}
+		by_cat = [], {}
 		for ex in examples:
 			resp = self.generate_response(model, tokenizer, ex.prompt)
 			r = self.judge_response(ex.prompt, resp)
@@ -105,7 +112,13 @@ Evaluate this teaching response according to the rubric above. Provide detailed 
 			scores.append(s)
 			if ex.category:
 				by_cat.setdefault(ex.category, []).append(s)
+    
+			details["prompts"].append(ex.prompt)
+			details["responses"].append(resp)
+			details["judgments"].append(r["judgment"])
+			details["scores"].append(s)
 
+		scores = np.array(details["scores"])
 		metrics = {
 			"teaching_quality_score": float(np.mean(scores)),
 			"teaching_quality_std": float(np.std(scores)),
@@ -114,8 +127,8 @@ Evaluate this teaching response according to the rubric above. Provide detailed 
 		}
 		for cat, vals in by_cat.items():
 			metrics[f"teaching_quality_{cat}"] = float(np.mean(vals))
-
-		return metrics
+   
+		return metrics, details
 
 
 class TeachingEvalCallback(TrainerCallback):
@@ -147,7 +160,7 @@ class TeachingEvalCallback(TrainerCallback):
 			return control
 
 		model.eval()
-		metrics = self.evaluator.evaluate(model, tokenizer, self.num_examples)
+		metrics, judgement_details = self.evaluator.evaluate(model, tokenizer, self.num_examples)
 		model.train()
 
 		# Log metrics
@@ -166,6 +179,7 @@ class TeachingEvalCallback(TrainerCallback):
 					},
 					step=state.global_step,
 				)
+				wandb.log(judgement_details, step=state.global_step)
 		except ImportError:
 			pass  # wandb not installed
 
@@ -196,7 +210,7 @@ if __name__ == "__main__":
 	evaluator = TeachingEvaluator(judge)
 
 	# Run evaluation
-	results = evaluator.evaluate(model, tokenizer)
+	results = evaluator.evaluate(model, tokenizer, num_examples=1)
 	print("\nEvaluation Results:")
 	for key, value in results.items():
 		print(f"{key}: {value:.3f}")

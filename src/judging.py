@@ -10,15 +10,21 @@ class JudgeResult:
     judgment: str
     score: float
 
-_SCORE_RE = re.compile(r"SCORE:\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
 
 def _extract_score(text: str) -> float:
-    m = _SCORE_RE.search(text)
-    if m:
-        s = float(m.group(1))
+    # Get the last line with SCORE: X
+    matches = list(re.finditer(r'(?i)SCORE:\s*(\d+(?:\.\d+)?)(?!\s*/)', text))
+    if matches:
+        s = float(matches[-1].group(1))  # take the last match
         return max(1.0, min(10.0, s))
-    nums = re.findall(r'\b([1-9]|10)\b', text)
-    return float(nums[-1]) if nums else 5.0
+
+    # Fallback: any integer 1..10 not part of a fraction, take the last
+    nums = re.findall(r'(?<![\d/])\b(10|[1-9])\b(?!\s*/)', text)
+    if nums:
+        s = float(nums[-1])
+        return max(1.0, min(10.0, s))
+
+    return 5.0
 
 class Judge:
     def judge(self, messages: List[Dict[str, str]]) -> JudgeResult:
