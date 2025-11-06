@@ -165,8 +165,6 @@ def train_dpo(config: Config):
             max_prompt_length=config.max_length // 2,
             model_adapter_name="fine_tune",
             ref_adapter_name="reference",
-            fp16=False,
-            bf16=False,
             # reference_freeze=True,
         )
     )
