@@ -1,7 +1,3 @@
-"""
-Streamlined Fine-tuning Pipeline for SFT and DPO
-Supports preference datasets with 'messages' column format
-"""
 
 import torch
 import logging
@@ -26,11 +22,11 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 from testing import TeachingEvalCallback, TeachingEvaluator
 from judging import HFJudge
-from config import Config, default_config
+from config import Config, default_config, testing_config
 
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
@@ -51,21 +47,8 @@ def load_model_and_tokenizer(config: Config):
         dtype=torch.bfloat16,
     )
     
-    # Prepare for training
-    model = prepare_model_for_kbit_training(model)
-    
     # Add LoRA adapters
-    lora_config = LoraConfig(
-        r=config.lora_r,
-        lora_alpha=config.lora_alpha,
-        lora_dropout=config.lora_dropout,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", 
-                       "gate_proj", "up_proj", "down_proj"],
-        bias="none",
-        task_type="CAUSAL_LM",
-    )
-    
-    model = get_peft_model(model, lora_config)
+    model = get_peft_model(model, config.lora_config(), adapter_name="fine_tune")
     model.print_trainable_parameters()
     
     return model, tokenizer
@@ -99,6 +82,10 @@ def prepare_datasets(config: Config, tokenizer, for_sft: bool = False):
             batched=True,
             remove_columns=eval_dataset.column_names
         )
+    else:
+        # Need to remove messages column for DPO
+        train_dataset = train_dataset.remove_columns(["messages"])
+        eval_dataset = eval_dataset.remove_columns(["messages"])
     
     return train_dataset, eval_dataset
 
@@ -162,6 +149,7 @@ def train_dpo(config: Config):
     
     # Load base model and add LoRA
     model, tokenizer = load_model_and_tokenizer(config)
+    model.add_adapter("reference", config.lora_config())
     
     # Prepare datasets (DPO format - keeps prompt, chosen, rejected)
     train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
@@ -175,6 +163,8 @@ def train_dpo(config: Config):
         **config.get_base_training_args(
             beta=config.dpo_beta,
             max_prompt_length=config.max_length // 2,
+            model_adapter_name="fine_tune",
+            ref_adapter_name="reference",
             # reference_freeze=True,
         )
     )
@@ -191,6 +181,35 @@ def train_dpo(config: Config):
             TeachingEvalCallback(evaluator, num_examples=5)
         ]
     )
+    
+    # --- Patch to ensure index tensors are Long ---
+    def _ensure_int_index_tensors(batch):
+        """Cast any index-like tensors to Long so embeddings don't crash."""
+        fixed = {}
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                # Heuristic: ids / masks / labels must be integer dtypes
+                needs_int = (
+                    k == "labels" or
+                    "ids" in k or
+                    "mask" in k or
+                    "position_ids" in k
+                )
+                if needs_int and v.dtype not in (torch.int64, torch.int32):
+                    v = v.long()
+            fixed[k] = v
+        return fixed
+
+    # Keep original for delegation
+    _orig_concatenated_forward = trainer.concatenated_forward
+
+    def _concatenated_forward_safe(model, batch, is_ref_model: bool = False):
+        batch = _ensure_int_index_tensors(batch)
+        return _orig_concatenated_forward(model, batch, is_ref_model)
+
+    # Patch the trainer
+    trainer.concatenated_forward = _concatenated_forward_safe
+    # --- end patch ---
 
     logger.info(f"Trainer is using device: {trainer.args.device}")
     
@@ -331,9 +350,17 @@ if __name__ == "__main__":
         required=True,
         help="Fine-tuning method to use: 'sft', 'dpo', 'rm', or 'grpo'."
     )
+    parser.add_argument("--test", action="store_true", help="Use testing configuration with smaller model and dataset.")
     args = parser.parse_args()
     method = args.method.lower()
-    config = default_config(method)
+
+    if args.test:
+        print("Running in TEST mode with smaller configuration.")
+        logger.info("Using testing configuration.")
+        config = testing_config(method)
+    else:
+        logger.info("Using default configuration.")
+        config = default_config(method)
     
     match method:
         case "sft":
