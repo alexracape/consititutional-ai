@@ -8,6 +8,7 @@ class Config:
 	"""Single configuration class for all settings."""
 	# Model
 	model_name: str = "meta-llama/Llama-3.1-8B-Instruct"
+	bf16: bool = True
 	
 	# Dataset
 	dataset_name: str = "aracape/cai-education-single-turn"
@@ -58,7 +59,7 @@ class Config:
 			"save_strategy": "steps",
 			"eval_steps": self.eval_steps,
 			"save_steps": self.save_steps,
-			"bf16": True,
+			"bf16": self.bf16,
 			"report_to": "wandb" if self.use_wandb else "none",
 			"run_name": self.wandb_run,
 			"load_best_model_at_end": True,
@@ -118,4 +119,12 @@ def default_config(method: str) -> Config:
 				case _:
 						raise ValueError(f"Unknown method: {method}")
 		
+		return config
+
+def testing_config(method: str) -> Config:
+		"""Return configuration for testing purposes."""
+		config = default_config(method)
+		config.model_name = "meta-llama/Llama-3.2-1B-Instruct"
+		config.bf16 = False
+
 		return config
