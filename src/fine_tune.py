@@ -55,17 +55,7 @@ def load_model_and_tokenizer(config: Config):
     model = prepare_model_for_kbit_training(model)
     
     # Add LoRA adapters
-    lora_config = LoraConfig(
-        r=config.lora_r,
-        lora_alpha=config.lora_alpha,
-        lora_dropout=config.lora_dropout,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", 
-                       "gate_proj", "up_proj", "down_proj"],
-        bias="none",
-        task_type="CAUSAL_LM",
-    )
-    
-    model = get_peft_model(model, lora_config)
+    model = get_peft_model(model, config.lora_config(), adapter_name="train")
     model.print_trainable_parameters()
     
     return model, tokenizer
@@ -162,6 +152,7 @@ def train_dpo(config: Config):
     
     # Load base model and add LoRA
     model, tokenizer = load_model_and_tokenizer(config)
+    model.add_adapter("reference", config.lora_config())
     
     # Prepare datasets (DPO format - keeps prompt, chosen, rejected)
     train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
@@ -175,6 +166,8 @@ def train_dpo(config: Config):
         **config.get_base_training_args(
             beta=config.dpo_beta,
             max_prompt_length=config.max_length // 2,
+            model_adapter_name="train",
+            ref_adapter_name="reference",
             # reference_freeze=True,
         )
     )
