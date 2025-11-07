@@ -104,7 +104,7 @@ Evaluate this teaching response according to the rubric above. Provide detailed 
 			"judgments": [],
 			"scores": [],
 		}
-		by_cat = [], {}
+		scores, by_cat = [], {}
 		for ex in examples:
 			resp = self.generate_response(model, tokenizer, ex.prompt)
 			r = self.judge_response(ex.prompt, resp)
@@ -159,8 +159,13 @@ class TeachingEvalCallback(TrainerCallback):
 			logger.debug(f"Kwargs: {kwargs}")
 			return control
 
+		metrics = {}
+		judgement_details = {}
 		model.eval()
-		metrics, judgement_details = self.evaluator.evaluate(model, tokenizer, self.num_examples)
+		try:
+			metrics, judgement_details = self.evaluator.evaluate(model, tokenizer, self.num_examples)
+		except Exception as e:
+			logger.error(f"Error during teaching quality evaluation: {e}")
 		model.train()
 
 		# Log metrics
@@ -210,7 +215,9 @@ if __name__ == "__main__":
 	evaluator = TeachingEvaluator(judge)
 
 	# Run evaluation
-	results = evaluator.evaluate(model, tokenizer, num_examples=1)
+	metrics, details = evaluator.evaluate(model, tokenizer, num_examples=1)
 	print("\nEvaluation Results:")
-	for key, value in results.items():
-		print(f"{key}: {value:.3f}")
+	for k, v in metrics.items():
+		print(f"{k}: {v:.3f}")
+	for k, v in details.items():
+		print(f"{k}: {v[0]}")
