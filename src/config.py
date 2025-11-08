@@ -22,7 +22,7 @@ class Config:
 	
 	# Training
 	output_dir: str = "./results"
-	num_epochs: int = 5
+	num_epochs: int = 3
 	batch_size: int = 4
 	gradient_accumulation_steps: int = 4
 	learning_rate: float = 1e-4
@@ -95,36 +95,39 @@ class Config:
 		)
 
 def default_config(method: str) -> Config:
-		"""Return default configuration based on the training method."""
-		config = Config()
-		
-		match method:
-				case "sft":
-						config.wandb_run = "sft_finetune"
-						config.output_dir = "./results/sft"
-						config.hub_model_id = "aracape/teaching-assistant-8B-sft"
-				case "dpo":
-						config.wandb_run = "dpo_finetune"
-						config.output_dir = "./results/dpo"
-						config.hub_model_id = "aracape/teaching-assistant-8B-dpo"
-				case "rm":
-						config.model_name = "Qwen/Qwen3-0.6B"
-						config.wandb_run = "rm_finetune"
-						config.output_dir = "./results/rm"
-						config.hub_model_id = "aracape/teaching-assistant-0.6B-rm"
-				case "grpo":
-						config.wandb_run = "grpo_finetune"
-						config.output_dir = "./results/grpo"
-						config.hub_model_id = "aracape/teaching-assistant-8B-grpo"
-				case _:
-						raise ValueError(f"Unknown method: {method}")
-		
-		return config
+	"""Return default configuration based on the training method."""
+	config = Config()
+	
+	match method:
+		case "sft":
+			config.wandb_run = "sft_finetune"
+			config.output_dir = "./results/sft"
+			config.hub_model_id = "aracape/teaching-assistant-8B-sft"
+		case "dpo":
+			config.wandb_run = "dpo_finetune"
+			config.output_dir = "./results/dpo"
+			config.hub_model_id = "aracape/teaching-assistant-8B-dpo"
+		case "rm":
+			config.model_name = "Qwen/Qwen3-0.6B"
+			config.wandb_run = "rm_finetune"
+			config.output_dir = "./results/rm"
+			config.hub_model_id = "aracape/teaching-assistant-0.6B-rm"
+		case "grpo":
+			config.wandb_run = "grpo_finetune"
+			config.output_dir = "./results/grpo"
+			config.hub_model_id = "aracape/teaching-assistant-8B-grpo"
+		case _:
+			raise ValueError(f"Unknown method: {method}")
+	
+	return config
 
 def testing_config(method: str) -> Config:
-		"""Return configuration for testing purposes."""
-		config = default_config(method)
-		config.model_name = "meta-llama/Llama-3.2-1B-Instruct"
-		config.bf16 = False
+	"""Return configuration for testing purposes."""
+	config = default_config(method)
+	config.model_name = "meta-llama/Llama-3.2-1B-Instruct"
+	config.bf16 = False
+	config.use_wandb = False
+	config.num_epochs = 1
+	config.push_to_hub = False
 
-		return config
+	return config
