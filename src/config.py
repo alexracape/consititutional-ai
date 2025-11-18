@@ -25,7 +25,6 @@ class Config:
 	output_dir: str = "./results"
 	num_epochs: int = 3
 	batch_size: int = 8
-	gradient_accumulation_steps: int = 4
 	learning_rate: float = 1e-4
 	warmup_ratio: float = 0.03
 
@@ -53,7 +52,6 @@ class Config:
 			"num_train_epochs": self.num_epochs,
 			"per_device_train_batch_size": self.batch_size,
 			"per_device_eval_batch_size": self.batch_size,
-			"gradient_accumulation_steps": self.gradient_accumulation_steps,
 			"learning_rate": self.learning_rate,
 			"warmup_ratio": self.warmup_ratio,
 			"eval_strategy": "steps",

@@ -33,30 +33,12 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+def prepare_datasets(config: Config, for_sft: bool = False):
+    """Load and prepare datasets."""
 
-def load_model_and_tokenizer(config: Config):
-    """Load model with 8-bit quantization and tokenizer."""
-    # Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
-
-    dtype = torch.bfloat16 if config.bf16 else torch.float16
-    model = AutoModelForCausalLM.from_pretrained(
-        config.model_name,
-        device_map="auto",
-        dtype=dtype,
-    )
-    
-    # Add LoRA adapters
-    model = get_peft_model(model, config.lora_config(), adapter_name="fine_tune")
-    model.print_trainable_parameters()
-    
-    return model, tokenizer
-
-
-def prepare_datasets(config: Config, tokenizer, for_sft: bool = False):
-    """Load and prepare datasets."""
 
     def format_for_sft(examples):
         texts = []
@@ -102,11 +84,8 @@ def train_sft(config: Config):
     print("Starting Supervised Fine-Tuning (SFT)")
     print("=" * 60)
     
-    # Load model and tokenizer
-    model, tokenizer = load_model_and_tokenizer(config)
-    
     # Prepare datasets
-    train_dataset, eval_dataset = prepare_datasets(config, tokenizer, for_sft=True)
+    train_dataset, eval_dataset = prepare_datasets(config, for_sft=True)
 
     # Load custom evaluator
     judge = HFJudge(model=config.judge_model)
@@ -121,7 +100,7 @@ def train_sft(config: Config):
     
     # Initialize trainer
     trainer = SFTTrainer(
-        model=model,
+        model=config.model_name,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
@@ -240,11 +219,8 @@ def train_grpo(config: Config):
     print("Starting Group Relative Policy Optimization (GRPO)")
     print("=" * 60)
     
-    # Load model and tokenizer
-    model, tokenizer = load_model_and_tokenizer(config)
-    
     # Prepare datasets
-    train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
+    train_dataset, eval_dataset = prepare_datasets(config)
 
     # Load custom evaluator
     judge = HFJudge(model=config.judge_model)
@@ -257,7 +233,8 @@ def train_grpo(config: Config):
     
     # Initialize trainer
     trainer = GRPOTrainer(
-        model=model,
+        model=config.model_name,
+        peft_config=config.lora_config(),
         reward_funcs=config.reward_model_name,
         args=training_args,
         train_dataset=train_dataset,
@@ -275,7 +252,6 @@ def train_grpo(config: Config):
     # Save locally
     output_path = f"{config.output_dir}/grpo/final"
     trainer.save_model(output_path)
-    tokenizer.save_pretrained(output_path)
     
     logger.info(f"\n✓ GRPO completed! Model saved to: {output_path}")
     if config.push_to_hub:
@@ -290,17 +266,14 @@ def train_reward_model(config: Config):
     print("Starting Reward Model Training")
     print("=" * 60)
     
-    # Load model and tokenizer
-    model, tokenizer = load_model_and_tokenizer(config)
-    
     # Prepare datasets
-    train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
+    train_dataset, eval_dataset = prepare_datasets(config)
     
     # Get base training args for reward model
     reward_config = RewardConfig(**config.get_base_training_args())
 
     trainer = RewardTrainer(
-        model=model,
+        model=config.model_name,
         args=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
