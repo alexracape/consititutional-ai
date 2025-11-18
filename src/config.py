@@ -43,7 +43,7 @@ class Config:
 	# HuggingFace Hub
 	push_to_hub: bool = True
 	hub_model_id: Optional[str] = "aracape/teaching-assistant-llm"
-	hub_strategy: str = "end"
+	hub_strategy: str = "every_save"
 	
 	def get_base_training_args(self, **kwargs) -> Dict[str, Any]:
 		"""Get common training arguments for all training types."""

@@ -130,6 +130,30 @@ Evaluate this teaching response according to the rubric above. Provide detailed 
    
 		return metrics, details
 
+def to_wandb_table(judgement_details: Dict[str, List], step: int):
+	"""Convert judgement details to a wandb Table for logging"""
+	try:
+		import wandb
+	except ImportError:
+		raise ImportError("wandb is not installed")
+
+	table_data = []
+	for i in range(len(judgement_details["prompts"])):
+		table_data.append(
+			[
+				step,
+				judgement_details["prompts"][i],
+				judgement_details["responses"][i],
+				judgement_details["judgments"][i],
+				judgement_details["scores"][i],
+			]
+		)
+
+	table = wandb.Table(
+		columns=["step", "prompt", "response", "judgment", "score"],
+		data=table_data,
+	)
+	return table
 
 class TeachingEvalCallback(TrainerCallback):
 	"""
@@ -185,6 +209,9 @@ class TeachingEvalCallback(TrainerCallback):
 					step=state.global_step,
 				)
 				wandb.log(judgement_details, step=state.global_step)
+				table = to_wandb_table(judgement_details, state.global_step)
+				wandb.log({"teaching_eval_details": table}, step=state.global_step)
+				
 		except ImportError:
 			pass  # wandb not installed
 
