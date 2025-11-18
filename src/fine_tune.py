@@ -1,13 +1,9 @@
 
 import torch
 import logging
-from typing import Optional, Dict, Any
 import argparse
 from datasets import load_dataset
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-)
+from transformers import AutoTokenizer
 from trl import (
     SFTTrainer, 
     SFTConfig,
@@ -18,7 +14,6 @@ from trl import (
     RewardTrainer,
     RewardConfig
 )
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 from testing import TeachingEvalCallback, TeachingEvaluator
 from judging import HFJudge
@@ -117,7 +112,6 @@ def train_sft(config: Config):
     # Save locally
     output_path = f"{config.output_dir}/sft/final"
     trainer.save_model(output_path)
-    tokenizer.save_pretrained(output_path)
     
     logger.info(f"\n✓ SFT completed! Model saved to: {output_path}")
     if config.push_to_hub:
@@ -132,12 +126,8 @@ def train_dpo(config: Config):
     print("Starting Direct Preference Optimization (DPO)")
     print("=" * 60)
     
-    # Load base model and add LoRA
-    model, tokenizer = load_model_and_tokenizer(config)
-    model.add_adapter("reference", config.lora_config())
-    
     # Prepare datasets (DPO format - keeps prompt, chosen, rejected)
-    train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
+    train_dataset, eval_dataset = prepare_datasets(config)
 
     # Load evaluator
     judge = HFJudge(model=config.judge_model)
@@ -156,8 +146,7 @@ def train_dpo(config: Config):
     
     # Initialize DPO trainer
     trainer = DPOTrainer(
-        model=model,
-        processing_class=tokenizer,
+        model=config.model_name,
         ref_model=None,  # Will create reference model automatically
         args=dpo_config,
         train_dataset=train_dataset,
@@ -204,7 +193,6 @@ def train_dpo(config: Config):
     # Save locally
     output_path = f"{config.output_dir}/dpo/final"
     trainer.save_model(output_path)
-    tokenizer.save_pretrained(output_path)
     
     logger.info(f"\n✓ DPO completed! Model saved to: {output_path}")
     if config.push_to_hub:
