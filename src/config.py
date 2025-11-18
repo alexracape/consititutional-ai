@@ -8,6 +8,7 @@ class Config:
 	"""Single configuration class for all settings."""
 	# Model
 	model_name: str = "meta-llama/Llama-3.1-8B-Instruct"
+	reward_model_name: str = "aracape/teaching-assistant-0.6B-rm"
 	bf16: bool = True
 	
 	# Dataset
@@ -23,7 +24,7 @@ class Config:
 	# Training
 	output_dir: str = "./results"
 	num_epochs: int = 3
-	batch_size: int = 4
+	batch_size: int = 8
 	gradient_accumulation_steps: int = 4
 	learning_rate: float = 1e-4
 	warmup_ratio: float = 0.03
@@ -34,7 +35,7 @@ class Config:
 	judge_model: str = "meta-llama/Meta-Llama-3-70B-Instruct"
 	
 	# DPO specific
-	dpo_beta: float = 0.2
+	dpo_beta: float = 0.5
 	
 	# Logging
 	use_wandb: bool = True

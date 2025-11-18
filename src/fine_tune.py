@@ -40,11 +40,12 @@ def load_model_and_tokenizer(config: Config):
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
-    
+
+    dtype = torch.bfloat16 if config.bf16 else torch.float16
     model = AutoModelForCausalLM.from_pretrained(
         config.model_name,
         device_map="auto",
-        dtype=torch.bfloat16,
+        dtype=dtype,
     )
     
     # Add LoRA adapters
@@ -70,6 +71,11 @@ def prepare_datasets(config: Config, tokenizer, for_sft: bool = False):
     split_dataset = dataset.train_test_split(test_size=config.test_size, seed=42)
     train_dataset = split_dataset["train"]
     eval_dataset = split_dataset["test"]
+
+    # Rename 'question' to 'prompt' to match expected format
+    if "question" in train_dataset.column_names:
+        train_dataset = train_dataset.rename_column("question", "prompt")
+        eval_dataset = eval_dataset.rename_column("question", "prompt")
     
     if for_sft:
         train_dataset = train_dataset.map(
@@ -245,13 +251,14 @@ def train_grpo(config: Config):
     evaluator = TeachingEvaluator(judge)
     
     # Get base training args and add GRPO-specific settings
-    training_args = GRPOConfig(
-        **config.get_base_training_args(chat_template_path=config.model_name)
-    )
+    args = config.get_base_training_args()
+    del args["max_length"]  # GRPOConfig does not accept max_length
+    training_args = GRPOConfig(**args)
     
     # Initialize trainer
     trainer = GRPOTrainer(
         model=model,
+        reward_funcs=config.reward_model_name,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
