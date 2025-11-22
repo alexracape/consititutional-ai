@@ -3,7 +3,7 @@ import torch
 import logging
 import argparse
 from datasets import load_dataset
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoConfig
 from trl import (
     SFTTrainer, 
     SFTConfig,
@@ -112,6 +112,11 @@ def train_sft(config: Config):
     # Save locally
     output_path = f"{config.output_dir}/sft/final"
     trainer.save_model(output_path)
+
+    # Save the config as well
+    config = AutoConfig.from_pretrained(config.model_name)
+    config.save_pretrained(output_path)
+    config.push_to_hub(config.hub_model_id)
     
     logger.info(f"\n✓ SFT completed! Model saved to: {output_path}")
     if config.push_to_hub:
@@ -193,6 +198,11 @@ def train_dpo(config: Config):
     # Save locally
     output_path = f"{config.output_dir}/dpo/final"
     trainer.save_model(output_path)
+
+    # Save the config as well
+    config = AutoConfig.from_pretrained(config.model_name)
+    config.save_pretrained(output_path)
+    config.push_to_hub(config.hub_model_id)
     
     logger.info(f"\n✓ DPO completed! Model saved to: {output_path}")
     if config.push_to_hub:
@@ -241,6 +251,11 @@ def train_grpo(config: Config):
     output_path = f"{config.output_dir}/grpo/final"
     trainer.save_model(output_path)
     
+    # Save the config as well
+    config = AutoConfig.from_pretrained(config.model_name)
+    config.save_pretrained(output_path)
+    config.push_to_hub(config.hub_model_id)
+
     logger.info(f"\n✓ GRPO completed! Model saved to: {output_path}")
     if config.push_to_hub:
         logger.info(f"✓ Model uploaded to HF Hub: {config.hub_model_id}")
@@ -278,29 +293,6 @@ def train_reward_model(config: Config):
         logger.info(f"✓ Model uploaded to HF Hub: {config.hub_model_id}")
     
     return output_path
-
-
-def train_combined(config: Config):
-    """Run combined SFT -> DPO training."""
-    print("=" * 60)
-    print("Combined Training: SFT → DPO")
-    print("=" * 60)
-    
-    # Phase 1: SFT
-    logger.info("[Phase 1/2] Supervised Fine-Tuning")
-    sft_model_path = train_sft(config)
-    
-    # Phase 2: DPO on top of SFT model
-    logger.info("[Phase 2/2] Direct Preference Optimization")
-    final_model_path = train_dpo(config, sft_model_path=sft_model_path)
-    
-    print("\n" + "=" * 60)
-    print("✓ Combined training completed!")
-    print(f"  SFT model: {sft_model_path}")
-    print(f"  Final model: {final_model_path}")
-    print("=" * 60)
-    
-    return final_model_path
 
 
 if __name__ == "__main__":
