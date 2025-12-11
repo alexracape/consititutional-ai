@@ -1,13 +1,9 @@
 
 import torch
 import logging
-from typing import Optional, Dict, Any
 import argparse
 from datasets import load_dataset
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-)
+from transformers import AutoTokenizer, AutoConfig
 from trl import (
     SFTTrainer, 
     SFTConfig,
@@ -18,7 +14,6 @@ from trl import (
     RewardTrainer,
     RewardConfig
 )
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 from testing import TeachingEvalCallback, TeachingEvaluator
 from judging import HFJudge
@@ -33,30 +28,12 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+def prepare_datasets(config: Config, for_sft: bool = False):
+    """Load and prepare datasets."""
 
-def load_model_and_tokenizer(config: Config):
-    """Load model with 8-bit quantization and tokenizer."""
-    # Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
-
-    dtype = torch.bfloat16 if config.bf16 else torch.float16
-    model = AutoModelForCausalLM.from_pretrained(
-        config.model_name,
-        device_map="auto",
-        dtype=dtype,
-    )
-    
-    # Add LoRA adapters
-    model = get_peft_model(model, config.lora_config(), adapter_name="fine_tune")
-    model.print_trainable_parameters()
-    
-    return model, tokenizer
-
-
-def prepare_datasets(config: Config, tokenizer, for_sft: bool = False):
-    """Load and prepare datasets."""
 
     def format_for_sft(examples):
         texts = []
@@ -102,11 +79,8 @@ def train_sft(config: Config):
     print("Starting Supervised Fine-Tuning (SFT)")
     print("=" * 60)
     
-    # Load model and tokenizer
-    model, tokenizer = load_model_and_tokenizer(config)
-    
     # Prepare datasets
-    train_dataset, eval_dataset = prepare_datasets(config, tokenizer, for_sft=True)
+    train_dataset, eval_dataset = prepare_datasets(config, for_sft=True)
 
     # Load custom evaluator
     judge = HFJudge(model=config.judge_model)
@@ -121,7 +95,7 @@ def train_sft(config: Config):
     
     # Initialize trainer
     trainer = SFTTrainer(
-        model=model,
+        model=config.model_name,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
@@ -138,7 +112,11 @@ def train_sft(config: Config):
     # Save locally
     output_path = f"{config.output_dir}/sft/final"
     trainer.save_model(output_path)
-    tokenizer.save_pretrained(output_path)
+
+    # Save the config as well
+    config = AutoConfig.from_pretrained(config.model_name)
+    config.save_pretrained(output_path)
+    config.push_to_hub(config.hub_model_id)
     
     logger.info(f"\n✓ SFT completed! Model saved to: {output_path}")
     if config.push_to_hub:
@@ -153,12 +131,8 @@ def train_dpo(config: Config):
     print("Starting Direct Preference Optimization (DPO)")
     print("=" * 60)
     
-    # Load base model and add LoRA
-    model, tokenizer = load_model_and_tokenizer(config)
-    model.add_adapter("reference", config.lora_config())
-    
     # Prepare datasets (DPO format - keeps prompt, chosen, rejected)
-    train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
+    train_dataset, eval_dataset = prepare_datasets(config)
 
     # Load evaluator
     judge = HFJudge(model=config.judge_model)
@@ -177,8 +151,7 @@ def train_dpo(config: Config):
     
     # Initialize DPO trainer
     trainer = DPOTrainer(
-        model=model,
-        processing_class=tokenizer,
+        model=config.model_name,
         ref_model=None,  # Will create reference model automatically
         args=dpo_config,
         train_dataset=train_dataset,
@@ -225,7 +198,11 @@ def train_dpo(config: Config):
     # Save locally
     output_path = f"{config.output_dir}/dpo/final"
     trainer.save_model(output_path)
-    tokenizer.save_pretrained(output_path)
+
+    # Save the config as well
+    config = AutoConfig.from_pretrained(config.model_name)
+    config.save_pretrained(output_path)
+    config.push_to_hub(config.hub_model_id)
     
     logger.info(f"\n✓ DPO completed! Model saved to: {output_path}")
     if config.push_to_hub:
@@ -240,11 +217,8 @@ def train_grpo(config: Config):
     print("Starting Group Relative Policy Optimization (GRPO)")
     print("=" * 60)
     
-    # Load model and tokenizer
-    model, tokenizer = load_model_and_tokenizer(config)
-    
     # Prepare datasets
-    train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
+    train_dataset, eval_dataset = prepare_datasets(config)
 
     # Load custom evaluator
     judge = HFJudge(model=config.judge_model)
@@ -257,7 +231,8 @@ def train_grpo(config: Config):
     
     # Initialize trainer
     trainer = GRPOTrainer(
-        model=model,
+        model=config.model_name,
+        peft_config=config.lora_config(),
         reward_funcs=config.reward_model_name,
         args=training_args,
         train_dataset=train_dataset,
@@ -275,8 +250,12 @@ def train_grpo(config: Config):
     # Save locally
     output_path = f"{config.output_dir}/grpo/final"
     trainer.save_model(output_path)
-    tokenizer.save_pretrained(output_path)
     
+    # Save the config as well
+    config = AutoConfig.from_pretrained(config.model_name)
+    config.save_pretrained(output_path)
+    config.push_to_hub(config.hub_model_id)
+
     logger.info(f"\n✓ GRPO completed! Model saved to: {output_path}")
     if config.push_to_hub:
         logger.info(f"✓ Model uploaded to HF Hub: {config.hub_model_id}")
@@ -290,17 +269,14 @@ def train_reward_model(config: Config):
     print("Starting Reward Model Training")
     print("=" * 60)
     
-    # Load model and tokenizer
-    model, tokenizer = load_model_and_tokenizer(config)
-    
     # Prepare datasets
-    train_dataset, eval_dataset = prepare_datasets(config, tokenizer)
+    train_dataset, eval_dataset = prepare_datasets(config)
     
     # Get base training args for reward model
     reward_config = RewardConfig(**config.get_base_training_args())
 
     trainer = RewardTrainer(
-        model=model,
+        model=config.model_name,
         args=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
@@ -317,29 +293,6 @@ def train_reward_model(config: Config):
         logger.info(f"✓ Model uploaded to HF Hub: {config.hub_model_id}")
     
     return output_path
-
-
-def train_combined(config: Config):
-    """Run combined SFT -> DPO training."""
-    print("=" * 60)
-    print("Combined Training: SFT → DPO")
-    print("=" * 60)
-    
-    # Phase 1: SFT
-    logger.info("[Phase 1/2] Supervised Fine-Tuning")
-    sft_model_path = train_sft(config)
-    
-    # Phase 2: DPO on top of SFT model
-    logger.info("[Phase 2/2] Direct Preference Optimization")
-    final_model_path = train_dpo(config, sft_model_path=sft_model_path)
-    
-    print("\n" + "=" * 60)
-    print("✓ Combined training completed!")
-    print(f"  SFT model: {sft_model_path}")
-    print(f"  Final model: {final_model_path}")
-    print("=" * 60)
-    
-    return final_model_path
 
 
 if __name__ == "__main__":
