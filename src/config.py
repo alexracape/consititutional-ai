@@ -7,9 +7,9 @@ from peft import LoraConfig
 class Config:
 	"""Single configuration class for all settings."""
 	# Model
-	model_name: str = "meta-llama/Llama-3.1-8B-Instruct"
+	model_name: str = "meta-llama/Llama-3.2-1B-Instruct"
 	reward_model_name: str = "aracape/teaching-assistant-0.6B-rm"
-	bf16: bool = True
+	bf16: bool = False
 	
 	# Dataset
 	dataset_name: str = "aracape/cai-education-single-turn"
@@ -24,7 +24,9 @@ class Config:
 	# Training
 	output_dir: str = "./results"
 	num_epochs: int = 3
-	batch_size: int = 8
+	batch_size: int = 4
+	gradient_accumulation_steps: int = 4
+	max_steps: int = 50
 	learning_rate: float = 1e-4
 	warmup_ratio: float = 0.03
 
@@ -45,6 +47,9 @@ class Config:
 	hub_model_id: Optional[str] = "aracape/teaching-assistant-llm"
 	hub_strategy: str = "every_save"
 	
+	# Testing
+	is_test: bool = False
+	
 	def get_base_training_args(self, **kwargs) -> Dict[str, Any]:
 		"""Get common training arguments for all training types."""
 		base_args = {
@@ -52,6 +57,8 @@ class Config:
 			"num_train_epochs": self.num_epochs,
 			"per_device_train_batch_size": self.batch_size,
 			"per_device_eval_batch_size": self.batch_size,
+			"gradient_accumulation_steps": self.gradient_accumulation_steps,
+			"max_steps": self.max_steps,
 			"learning_rate": self.learning_rate,
 			"warmup_ratio": self.warmup_ratio,
 			"eval_strategy": "steps",
@@ -101,11 +108,11 @@ def default_config(method: str) -> Config:
 		case "sft":
 			config.wandb_run = "sft_finetune"
 			config.output_dir = "./results/sft"
-			config.hub_model_id = "aracape/teaching-assistant-8B-sft"
+			config.hub_model_id = "aracape/teaching-assistant-1B-sft"
 		case "dpo":
 			config.wandb_run = "dpo_finetune"
 			config.output_dir = "./results/dpo"
-			config.hub_model_id = "aracape/teaching-assistant-8B-dpo"
+			config.hub_model_id = "aracape/teaching-assistant-1B-dpo"
 		case "rm":
 			config.model_name = "Qwen/Qwen3-0.6B"
 			config.wandb_run = "rm_finetune"
@@ -126,7 +133,8 @@ def testing_config(method: str) -> Config:
 	config.model_name = "meta-llama/Llama-3.2-1B-Instruct"
 	config.bf16 = False
 	config.use_wandb = False
-	config.num_epochs = 1
+	config.max_steps = 1
 	config.push_to_hub = False
+	config.is_test = True
 
 	return config

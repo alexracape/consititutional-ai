@@ -20,10 +20,10 @@ from judging import HFJudge
 from config import Config, default_config, testing_config
 
 
+# Pretty logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    format='%(levelname)s - %(message)s',
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ def prepare_datasets(config: Config, for_sft: bool = False):
 
     # Load dataset
     dataset = load_dataset(config.dataset_name, split="train")
+
     split_dataset = dataset.train_test_split(test_size=config.test_size, seed=42)
     train_dataset = split_dataset["train"]
     eval_dataset = split_dataset["test"]
@@ -75,9 +76,7 @@ def prepare_datasets(config: Config, for_sft: bool = False):
 
 def train_sft(config: Config):
     """Run Supervised Fine-Tuning."""
-    print("=" * 60)
-    print("Starting Supervised Fine-Tuning (SFT)")
-    print("=" * 60)
+    logger.info("Starting Supervised Fine-Tuning (SFT)")
     
     # Prepare datasets
     train_dataset, eval_dataset = prepare_datasets(config, for_sft=True)
@@ -114,9 +113,9 @@ def train_sft(config: Config):
     trainer.save_model(output_path)
 
     # Save the config as well
-    config = AutoConfig.from_pretrained(config.model_name)
-    config.save_pretrained(output_path)
-    config.push_to_hub(config.hub_model_id)
+    model_config = AutoConfig.from_pretrained(config.model_name)
+    model_config.save_pretrained(output_path)
+    model_config.push_to_hub(config.hub_model_id)
     
     logger.info(f"\n✓ SFT completed! Model saved to: {output_path}")
     if config.push_to_hub:
@@ -127,9 +126,7 @@ def train_sft(config: Config):
 
 def train_dpo(config: Config):
     """Run Direct Preference Optimization."""
-    print("=" * 60)
-    print("Starting Direct Preference Optimization (DPO)")
-    print("=" * 60)
+    logger.info("Starting Direct Preference Optimization (DPO)")
     
     # Prepare datasets (DPO format - keeps prompt, chosen, rejected)
     train_dataset, eval_dataset = prepare_datasets(config)
@@ -143,8 +140,6 @@ def train_dpo(config: Config):
         **config.get_base_training_args(
             beta=config.dpo_beta,
             max_prompt_length=config.max_length // 2,
-            model_adapter_name="fine_tune",
-            ref_adapter_name="reference",
             # reference_freeze=True,
         )
     )
@@ -153,6 +148,7 @@ def train_dpo(config: Config):
     trainer = DPOTrainer(
         model=config.model_name,
         ref_model=None,  # Will create reference model automatically
+        peft_config=config.lora_config(),
         args=dpo_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
@@ -197,12 +193,19 @@ def train_dpo(config: Config):
     
     # Save locally
     output_path = f"{config.output_dir}/dpo/final"
-    trainer.save_model(output_path)
+    
+    logger.info("Merging and saving full model...")
+    # Unwrap and merge
+    model = trainer.accelerator.unwrap_model(trainer.model)
+    if hasattr(model, "merge_and_unload"):
+        model = model.merge_and_unload()
+    
+    model.save_pretrained(output_path, safe_serialization=True)
 
     # Save the config as well
-    config = AutoConfig.from_pretrained(config.model_name)
-    config.save_pretrained(output_path)
-    config.push_to_hub(config.hub_model_id)
+    model_config = AutoConfig.from_pretrained(config.model_name)
+    model_config.save_pretrained(output_path)
+    model_config.push_to_hub(config.hub_model_id)
     
     logger.info(f"\n✓ DPO completed! Model saved to: {output_path}")
     if config.push_to_hub:
@@ -213,9 +216,7 @@ def train_dpo(config: Config):
 
 def train_grpo(config: Config):
     """Run Group Relative Policy Optimization."""
-    print("=" * 60)
-    print("Starting Group Relative Policy Optimization (GRPO)")
-    print("=" * 60)
+    logger.info("Starting Group Relative Policy Optimization (GRPO)")
     
     # Prepare datasets
     train_dataset, eval_dataset = prepare_datasets(config)
@@ -252,9 +253,9 @@ def train_grpo(config: Config):
     trainer.save_model(output_path)
     
     # Save the config as well
-    config = AutoConfig.from_pretrained(config.model_name)
-    config.save_pretrained(output_path)
-    config.push_to_hub(config.hub_model_id)
+    model_config = AutoConfig.from_pretrained(config.model_name)
+    model_config.save_pretrained(output_path)
+    model_config.push_to_hub(config.hub_model_id)
 
     logger.info(f"\n✓ GRPO completed! Model saved to: {output_path}")
     if config.push_to_hub:
@@ -265,9 +266,7 @@ def train_grpo(config: Config):
 
 def train_reward_model(config: Config):
     """Train a reward model."""
-    print("=" * 60)
-    print("Starting Reward Model Training")
-    print("=" * 60)
+    logger.info("Starting Reward Model Training")
     
     # Prepare datasets
     train_dataset, eval_dataset = prepare_datasets(config)
@@ -315,8 +314,7 @@ if __name__ == "__main__":
     method = args.method.lower()
 
     if args.test:
-        print("Running in TEST mode with smaller configuration.")
-        logger.info("Using testing configuration.")
+        logger.info("Running in TEST mode with smaller configuration.")
         config = testing_config(method)
     else:
         logger.info("Using default configuration.")
