@@ -23,20 +23,20 @@ class Config:
 	
 	# Training
 	output_dir: str = "./results"
-	num_epochs: int = 3
-	batch_size: int = 4
+	batch_size: int = 2
 	gradient_accumulation_steps: int = 4
-	max_steps: int = 50
 	learning_rate: float = 1e-4
 	warmup_ratio: float = 0.03
 
-	# Evaluation and saving
-	eval_steps: int = 200
-	save_steps: int = 600
+	# Training steps and evaluation
+	# num_epochs: int = 3
+	max_steps: int = 100 	# Use instead of epochs when using small dataset
+	eval_steps: int = 10
+	save_steps: int = 20
 	judge_model: str = "meta-llama/Meta-Llama-3-70B-Instruct"
 	
 	# DPO specific
-	dpo_beta: float = 0.5
+	dpo_beta: float = 0.3
 	
 	# Logging
 	use_wandb: bool = True
@@ -54,7 +54,7 @@ class Config:
 		"""Get common training arguments for all training types."""
 		base_args = {
 			"output_dir": self.output_dir,
-			"num_train_epochs": self.num_epochs,
+			# "num_train_epochs": self.num_epochs,
 			"per_device_train_batch_size": self.batch_size,
 			"per_device_eval_batch_size": self.batch_size,
 			"gradient_accumulation_steps": self.gradient_accumulation_steps,
@@ -132,7 +132,8 @@ def testing_config(method: str) -> Config:
 	config = default_config(method)
 	config.model_name = "meta-llama/Llama-3.2-1B-Instruct"
 	config.bf16 = False
-	config.use_wandb = False
+	config.use_wandb = True
+	config.eval_steps = 1
 	config.max_steps = 1
 	config.push_to_hub = False
 	config.is_test = True

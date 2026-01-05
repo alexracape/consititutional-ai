@@ -201,17 +201,16 @@ class TeachingEvalCallback(TrainerCallback):
 			import wandb
 
 			if wandb.run is not None:
+				table = to_wandb_table(judgement_details, state.global_step)
 				wandb.log(
 					{
 						**metrics,
 						"teaching_eval_step": state.global_step,
+						"teaching_eval_details": table,
 					},
 					step=state.global_step,
 				)
-				wandb.log(judgement_details, step=state.global_step)
-				table = to_wandb_table(judgement_details, state.global_step)
-				wandb.log({"teaching_eval_details": table}, step=state.global_step)
-				
+
 		except ImportError:
 			pass  # wandb not installed
 

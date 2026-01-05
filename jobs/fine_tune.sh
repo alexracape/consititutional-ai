@@ -8,7 +8,6 @@
 #SBATCH -t 0-12:00
 #SBATCH --mem=32gb
 #SBATCH --gres=gpu:1
-#SBATCH --exclude=ins082
 
 
 module load anaconda
